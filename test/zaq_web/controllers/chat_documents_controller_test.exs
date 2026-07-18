@@ -57,6 +57,36 @@ defmodule ZaqWeb.ChatDocumentsControllerTest do
     assert List.first(get_resp_header(response, "content-type")) =~ "application/pdf"
   end
 
+  test "shows linked sidecar content while keeping the PDF original and sidecar private", %{
+    conn: conn,
+    root: root
+  } do
+    {:ok, parent} =
+      Document.create(%{
+        source: "documents/pv.pdf",
+        content: "# Extracted PV",
+        tags: ["public"],
+        metadata: %{"sidecar_source" => "documents/PV_augmente_2026-01-22.md"}
+      })
+
+    {:ok, sidecar} =
+      Document.create(%{
+        source: "documents/PV_augmente_2026-01-22.md",
+        content: "# PV augmenté",
+        content_type: "markdown",
+        metadata: %{"source_document_source" => parent.source}
+      })
+
+    shown = conn |> get("/chat/documents/#{parent.id}") |> json_response(200)
+    assert shown["content"] == "# PV augmenté"
+    assert shown["content_type"] == "markdown"
+
+    File.write!(Path.join(root, "pv.pdf"), "%PDF-original")
+    assert conn |> get("/chat/documents/#{parent.id}/file") |> response(200) == "%PDF-original"
+
+    assert conn |> get("/chat/documents/#{sidecar.id}") |> json_response(404)
+  end
+
   test "does not expose a private document or file", %{conn: conn, root: root} do
     {:ok, document} = Document.create(%{source: "documents/private.pdf"})
     File.write!(Path.join(root, "private.pdf"), "%PDF-private")

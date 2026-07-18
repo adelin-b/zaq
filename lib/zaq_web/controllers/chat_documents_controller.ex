@@ -2,6 +2,7 @@ defmodule ZaqWeb.ChatDocumentsController do
   use ZaqWeb, :controller
 
   alias Zaq.Ingestion
+  alias Zaq.Ingestion.{Document, Sidecar}
   alias Zaq.Ingestion.FileExplorer
 
   def index(conn, %{"prefix" => prefix}) do
@@ -49,10 +50,22 @@ defmodule ZaqWeb.ChatDocumentsController do
   end
 
   defp maybe_put_content(payload, document, true) do
-    Map.merge(payload, %{content: document.content, content_type: document.content_type})
+    content_document = linked_sidecar(document) || document
+
+    Map.merge(payload, %{
+      content: content_document.content,
+      content_type: content_document.content_type
+    })
   end
 
   defp maybe_put_content(payload, _document, false), do: payload
+
+  defp linked_sidecar(document) do
+    case Sidecar.sidecar_source(document) do
+      source when is_binary(source) -> Document.get_by_source(source)
+      nil -> nil
+    end
+  end
 
   defp json_error(conn, status, message) do
     conn |> put_status(status) |> json(%{error: %{message: message}})
