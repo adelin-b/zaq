@@ -419,7 +419,7 @@ defmodule ZaqWeb.Components.DesignSystem.Table.Grid do
 
   @doc "Grid shell — sticky header table + card grid body."
   attr :id, :string, required: true
-  attr :scrollable, :boolean, default: true
+  attr :scrollable, :boolean, default: false
   attr :columns, :integer, default: 4
   attr :class, :any, default: nil
   slot :header
