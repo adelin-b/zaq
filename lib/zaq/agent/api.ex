@@ -371,21 +371,39 @@ defmodule Zaq.Agent.Api do
           )
 
         selected_id ->
-          executor_module.run(incoming,
-            agent_id: selected_id,
-            scope: Executor.derive_scope(incoming, event.actor),
-            person_id: person_id,
-            team_ids: team_ids,
-            source_filter: incoming.content_filter,
-            skip_permissions: Keyword.get(pipeline_opts, :skip_permissions, false),
-            history: Keyword.get(pipeline_opts, :history, %{}),
-            context: Keyword.get(pipeline_opts, :context),
-            telemetry_dimensions: Keyword.get(pipeline_opts, :telemetry_dimensions, %{}),
-            event: event
+          executor_module.run(
+            incoming,
+            [
+              agent_id: selected_id,
+              scope: Executor.derive_scope(incoming, event.actor),
+              person_id: person_id,
+              team_ids: team_ids,
+              source_filter: incoming.content_filter,
+              skip_permissions: Keyword.get(pipeline_opts, :skip_permissions, false),
+              history: Keyword.get(pipeline_opts, :history, %{}),
+              context: Keyword.get(pipeline_opts, :context),
+              telemetry_dimensions: Keyword.get(pipeline_opts, :telemetry_dimensions, %{}),
+              event: event
+            ]
+            |> maybe_put_question(pipeline_opts)
           )
       end
 
     maybe_dispatch_return_hop(event, incoming, outgoing)
+  end
+
+  # Per-run question override (e.g. the chat channel's grounding preamble):
+  # framed text drives the run while `incoming.content` — the clean user
+  # question — is what gets persisted. Only forwarded when present so
+  # `Executor.run/2` keeps its `incoming.content` default otherwise.
+  defp maybe_put_question(opts, pipeline_opts) do
+    case Keyword.get(pipeline_opts, :question) do
+      question when is_binary(question) and question != "" ->
+        Keyword.put(opts, :question, question)
+
+      _ ->
+        opts
+    end
   end
 
   # This function is a good candidate to go into the NodeRouter for generalization

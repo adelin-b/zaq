@@ -15,13 +15,28 @@ defmodule ZaqWeb.ChatCompletionsController do
   a final frame under the non-standard `zaq_sources` key — OpenAI-only clients
   ignore the extra field.
 
+  ## Pipeline routing
+
+  Requests flow through `CommunicationBridge.route_incoming_message/5` →
+  `NodeRouter.dispatch/1` like every other channel bridge, so traces, Person
+  resolution (`Zaq.People.IdentityResolver`) and conversation persistence come
+  from the shared pipeline. The transport is a synchronous HTTP request, so the
+  controller subscribes to `Zaq.Channels.ChatBridge.topic/1` BEFORE routing and
+  blocks until `ChatBridge.send_reply/2` broadcasts the pipeline `%Outgoing{}`
+  back as `{:chat_result, request_id, outgoing}`.
+
+  The SSE wire is preserved for `stream: true` clients, but the answer arrives
+  as a single content delta: the shared pipeline returns one final result, and
+  intermediate status stages have no surface on the OpenAI wire.
+
   ## No client-resent history
 
   The caller sends ONLY the new user message. Prior turns are rehydrated
   server-side: the run is scoped to `chat:conv:<conversation_id>`, which cold-
   starts the agent with that conversation's history (`Zaq.Agent.HistoryLoader`),
-  and each turn is persisted (`Zaq.Engine.Conversations.persist_from_incoming/2`)
-  so the next cold start sees it.
+  and each turn is persisted by the pipeline's engine hop
+  (`Zaq.Engine.Conversations.persist_from_incoming/2`) so the next cold start
+  sees it.
 
   ## Security
 
@@ -31,23 +46,24 @@ defmodule ZaqWeb.ChatCompletionsController do
     gate access: a conversation is read/appended ONLY when its `channel_user_id`
     matches `user` and its `channel_type` is `"chat"`. This is the IDOR guard —
     history loads by `conversation_id`, so an unowned id must never resolve.
-  - Permission scoping runs with `person_id: nil` and `skip_permissions: false`,
-    so retrieval surfaces ONLY `"public"`-tagged documents. The anonymous
-    transport never blanket-bypasses document permissions.
+  - Permission scoping: the pipeline resolves a ZAQ Person from the `chat`
+    channel identity (the `user` id). Fresh chat Persons belong to no team, so
+    retrieval surfaces only `"public"`-tagged documents — the transport never
+    blanket-bypasses document permissions (`skip_permissions` stays false).
   """
 
   use ZaqWeb, :controller
 
-  require Logger
-
-  alias Zaq.Agent.{AnsweringRun, Executor}
+  alias Zaq.Agent.AnsweringRun
+  alias Zaq.Channels.{ChatBridge, CommunicationBridge}
   alias Zaq.Engine.Conversations
   alias Zaq.Engine.Conversations.Conversation
-  alias Zaq.Engine.Messages.Incoming
+  alias Zaq.Engine.Messages.Outgoing
 
   @max_messages 200
   @max_sources 8
   @max_iter_sentinel "Maximum iterations reached"
+  @default_result_timeout_ms 120_000
 
   # ---------------------------------------------------------------------------
   # POST /v1/chat/completions
@@ -59,157 +75,120 @@ defmodule ZaqWeb.ChatCompletionsController do
          {:ok, convo_id} <-
            fetch_required(params, "conversation_id", "conversation_id is required"),
          {:ok, _conv} <- ensure_owned_conversation(convo_id, user_id) do
-      incoming = build_incoming(question, convo_id, user_id)
-      # Grounding (an optional OpenAI `system` message) frames THIS run only —
-      # passed as the run question so it is injected into retrieval but never
-      # persisted (the stored user turn stays the clean question).
-      run(conn, incoming, params, with_system(system_content(params), question))
+      run(conn, params, question, convo_id, user_id)
     else
       {:error, status, message} -> json_error(conn, status, message)
     end
   end
 
-  defp run(conn, incoming, params, run_question) do
-    stream? = stream?(params)
-    id = "chatcmpl-" <> Integer.to_string(System.unique_integer([:positive]))
-    model = fetch(params, "model") || "zaq-chat"
+  defp run(conn, params, question, convo_id, user_id) do
+    request_id = Ecto.UUID.generate()
+    # Subscribe before routing so the reply broadcast can't win the race.
+    :ok = Phoenix.PubSub.subscribe(Zaq.PubSub, ChatBridge.topic(convo_id))
 
-    case Executor.stream(incoming,
-           question: run_question,
-           source_filter: parse_source_filter(params)
-         ) do
-      {:ok, %{events: events}} ->
-        conn = if stream?, do: start_sse(conn), else: conn
+    incoming =
+      ChatBridge.to_internal(%{
+        content: question,
+        conversation_id: convo_id,
+        author_id: user_id,
+        message_id: request_id,
+        source_filter: parse_source_filter(params)
+      })
 
-        %{
-          conn: conn,
-          id: id,
-          created: created_ts(),
-          model: model,
-          stream?: stream?,
-          buffer: [],
-          error: nil,
-          seen: MapSet.new(),
-          sources: [],
-          role_sent: false
-        }
-        |> fold(events)
-        |> respond(incoming)
+    acc = %{
+      conn: conn,
+      id: "chatcmpl-" <> Integer.to_string(System.unique_integer([:positive])),
+      created: created_ts(),
+      model: fetch(params, "model") || "zaq-chat",
+      stream?: stream?(params)
+    }
 
-      {:error, reason} ->
-        if stream? do
-          conn
-          |> start_sse()
-          |> emit(stream_error(id, model, created_ts(), reason))
-          |> sse_done()
-        else
-          json_error(conn, 502, error_message(reason))
-        end
+    # Grounding (an optional OpenAI `system` message) frames THIS run only —
+    # passed as the run question so it is injected into retrieval but never
+    # persisted (the stored user turn stays the clean question).
+    case route(incoming, with_system(system_content(params), question)) do
+      # Sync hop: the pipeline result came straight back.
+      %Outgoing{} = outgoing -> respond(acc, outgoing)
+      # Async hop: the result arrives via ChatBridge.send_reply/2 over PubSub.
+      :ok -> await_result(acc, request_id)
+      {:error, reason} -> respond_error(acc, reason)
+    end
+  end
+
+  defp route(incoming, run_question) do
+    CommunicationBridge.route_incoming_message(
+      incoming,
+      [question: run_question],
+      [{:global_default, Zaq.System.get_global_default_agent_id()}],
+      actor_from_incoming(incoming),
+      node_router: node_router_module()
+    )
+  end
+
+  defp actor_from_incoming(incoming) do
+    %{id: incoming.author_id, name: incoming.author_name, provider: incoming.provider}
+  end
+
+  defp await_result(acc, request_id) do
+    timeout = Application.get_env(:zaq, :chat_result_timeout_ms, @default_result_timeout_ms)
+
+    receive do
+      {:chat_result, ^request_id, %Outgoing{} = outgoing} -> respond(acc, outgoing)
+    after
+      timeout -> respond_error(acc, :timeout)
     end
   end
 
   # ---------------------------------------------------------------------------
-  # Event fold — classify jido events, buffer text, collect citations.
+  # Response — one pipeline result folded onto the OpenAI wire.
   # ---------------------------------------------------------------------------
 
-  defp fold(acc, events) do
-    Enum.reduce_while(events, acc, fn event, acc ->
-      acc = collect_sources(acc, AnsweringRun.extract_chunks(event))
+  defp respond(acc, %Outgoing{} = outgoing) do
+    answer = AnsweringRun.clean_answer(outgoing.body)
 
-      case AnsweringRun.classify_event(event) do
-        {:done, final} -> {:halt, backfill(acc, final)}
-        {:error, reason} -> {:halt, %{acc | error: reason}}
-        :ignore -> {:cont, acc}
-      end
-    end)
-  end
-
-  # The authoritative request result is sent as one OpenAI delta. Intermediate
-  # ReAct calls also emit content deltas and must not be merged into the answer.
-  defp push_delta(%{stream?: true} = acc, delta) do
-    acc = maybe_send_role(acc)
-
-    case emit_status(acc.conn, chunk(acc, %{content: delta}, nil)) do
-      {conn, :ok} -> %{acc | conn: conn, buffer: [delta | acc.buffer]}
-      {conn, :closed} -> %{acc | conn: conn, error: :client_gone}
+    case classify(outgoing.metadata, answer) do
+      :ok -> deliver(acc, answer, sources_from_outgoing(outgoing))
+      {:error, reason} -> respond_error(acc, reason)
     end
   end
 
-  defp push_delta(%{stream?: false} = acc, delta),
-    do: %{acc | buffer: [delta | acc.buffer]}
-
-  defp maybe_send_role(%{role_sent: true} = acc), do: acc
-
-  defp maybe_send_role(acc),
-    do: %{acc | conn: emit(acc.conn, chunk(acc, %{role: "assistant"}, nil)), role_sent: true}
-
-  # The request-completed result is authoritative. The "max iterations"
-  # sentinel is not a real answer: surface it as an error rather than a
-  # fabricated acknowledgement.
-  defp backfill(%{buffer: [_ | _]} = acc, _final), do: acc
-
-  defp backfill(acc, final) when is_binary(final) do
+  # The pipeline never raises — errors come back flagged on the result. The
+  # "max iterations" sentinel is not a real answer: surface it as an error
+  # rather than a fabricated acknowledgement.
+  defp classify(metadata, answer) do
     cond do
-      String.contains?(final, @max_iter_sentinel) -> %{acc | error: :max_iterations_reached}
-      String.trim(final) == "" -> %{acc | error: :empty_answer}
-      true -> push_delta(acc, final)
+      metadata_get(metadata, :error) == true -> {:error, :pipeline_error}
+      String.contains?(answer, @max_iter_sentinel) -> {:error, :max_iterations_reached}
+      String.trim(answer) == "" -> {:error, :empty_answer}
+      true -> :ok
     end
   end
 
-  defp backfill(acc, _final), do: %{acc | error: :empty_answer}
+  defp deliver(%{stream?: true} = acc, answer, sources) do
+    conn =
+      acc.conn
+      |> start_sse()
+      |> emit(chunk(acc, %{role: "assistant"}, nil))
+      |> emit(chunk(acc, %{content: answer}, nil))
+      |> emit(chunk(acc, %{}, "stop"))
 
-  # ---------------------------------------------------------------------------
-  # Response — stream terminal frames, or a single blocking completion.
-  # ---------------------------------------------------------------------------
-
-  defp respond(%{stream?: true, error: nil} = acc, incoming) do
-    persist(incoming, acc)
-
-    conn = emit(acc.conn, chunk(acc, %{}, "stop"))
-    conn = if acc.sources == [], do: conn, else: emit(conn, sources_frame(acc))
+    conn = if sources == [], do: conn, else: emit(conn, sources_frame(acc, sources))
     sse_done(conn)
   end
 
-  defp respond(%{stream?: true, error: reason} = acc, _incoming) do
+  defp deliver(%{stream?: false} = acc, answer, sources) do
+    json(acc.conn, completion(acc, answer, sources, "stop"))
+  end
+
+  defp respond_error(%{stream?: true} = acc, reason) do
     acc.conn
-    |> emit(stream_error(acc.id, acc.model, acc.created, reason))
+    |> start_sse()
+    |> emit(stream_error(acc, reason))
     |> sse_done()
   end
 
-  defp respond(%{stream?: false, error: nil} = acc, incoming) do
-    persist(incoming, acc)
-    json(acc.conn, completion(acc, "stop"))
-  end
-
-  defp respond(%{stream?: false, error: reason} = acc, _incoming) do
-    case assembled(acc) do
-      "" -> json_error(acc.conn, 502, error_message(reason))
-      _text -> json(acc.conn, completion(acc, "stop"))
-    end
-  end
-
-  # ---------------------------------------------------------------------------
-  # Persistence — user + assistant turn into the owned conversation.
-  # ---------------------------------------------------------------------------
-
-  defp persist(incoming, acc) do
-    answer = assembled(acc)
-
-    if String.trim(answer) != "" do
-      # Citations travel live on the wire; durable source rows need the
-      # CitationNormalizer input shape confirmed. Add when history needs sources.
-      Conversations.persist_from_incoming(incoming, %{
-        answer: answer,
-        sources: [],
-        confidence_score: nil,
-        latency_ms: nil,
-        prompt_tokens: nil,
-        completion_tokens: nil,
-        total_tokens: nil
-      })
-    end
-  rescue
-    error -> Logger.warning("chat persist failed: #{inspect(error)}")
+  defp respond_error(%{stream?: false} = acc, reason) do
+    json_error(acc.conn, 502, error_message(reason))
   end
 
   # ---------------------------------------------------------------------------
@@ -256,34 +235,53 @@ defmodule ZaqWeb.ChatCompletionsController do
     end
   end
 
-  defp build_incoming(question, convo_id, user_id) do
-    Incoming.new(%{
-      content: question,
-      channel_id: convo_id,
-      author_id: user_id,
-      provider: :chat,
-      metadata: %{conversation_id: convo_id}
-    })
-  end
-
   # ---------------------------------------------------------------------------
-  # Citations — unique (document, page) rows captured from the agent's
-  # retrievals, capped at @max_sources.
+  # Citations — unique (document, page) rows from the run's retrieval tool
+  # calls (carried on `outgoing.metadata[:tool_calls]`, json_safe-encoded),
+  # capped at @max_sources.
   # ---------------------------------------------------------------------------
 
-  defp collect_sources(%{sources: sources} = acc, _chunks) when length(sources) >= @max_sources,
-    do: acc
-
-  defp collect_sources(acc, chunks) do
-    Enum.reduce(chunks, acc, &maybe_add_source(&2, source_from_chunk(&1)))
+  defp sources_from_outgoing(%Outgoing{metadata: metadata}) do
+    metadata
+    |> metadata_get(:tool_calls)
+    |> List.wrap()
+    |> Enum.flat_map(&tool_call_chunks/1)
+    |> Enum.reduce({MapSet.new(), []}, &maybe_add_source(&2, source_from_chunk(&1)))
+    |> elem(1)
   end
+
+  # `tool_call["response"]` is the json_safe-encoded raw tool result: either a
+  # map (`%{"chunks" => [...]}`) or an encoded ok-tuple (`["ok", %{...}, ...]`).
+  defp tool_call_chunks(tool_call) when is_map(tool_call) do
+    tool_call |> metadata_get(:response) |> chunks_from_response()
+  end
+
+  defp tool_call_chunks(_tool_call), do: []
+
+  defp chunks_from_response(%{} = response) do
+    case metadata_get(response, :chunks) do
+      chunks when is_list(chunks) -> Enum.filter(chunks, &is_map/1)
+      _ -> []
+    end
+  end
+
+  defp chunks_from_response(["ok" | rest]) do
+    case Enum.find(rest, &is_map/1) do
+      nil -> []
+      inner -> chunks_from_response(inner)
+    end
+  end
+
+  defp chunks_from_response(_response), do: []
 
   defp maybe_add_source(acc, nil), do: acc
 
-  defp maybe_add_source(acc, {key, did, src, page}) do
-    if length(acc.sources) >= @max_sources or MapSet.member?(acc.seen, key),
-      do: acc,
-      else: add_source(acc, key, did, src, page)
+  defp maybe_add_source({seen, sources} = acc, {key, did, src, page}) do
+    if length(sources) >= @max_sources or MapSet.member?(seen, key) do
+      acc
+    else
+      {MapSet.put(seen, key), sources ++ [%{document_id: did, source: src, page: page}]}
+    end
   end
 
   defp source_from_chunk(chunk) do
@@ -296,18 +294,10 @@ defmodule ZaqWeb.ChatCompletionsController do
       else: nil
   end
 
-  defp add_source(acc, key, did, src, page) do
-    %{
-      acc
-      | seen: MapSet.put(acc.seen, key),
-        sources: acc.sources ++ [%{document_id: did, source: src, page: page}]
-    }
-  end
-
-  defp sources_frame(acc) do
+  defp sources_frame(acc, sources) do
     acc
     |> chunk(%{}, nil)
-    |> Map.put(:zaq_sources, sources_payload(acc.sources))
+    |> Map.put(:zaq_sources, sources_payload(sources))
   end
 
   defp sources_payload(sources) do
@@ -336,7 +326,7 @@ defmodule ZaqWeb.ChatCompletionsController do
     }
   end
 
-  defp completion(acc, finish_reason) do
+  defp completion(acc, answer, sources, finish_reason) do
     %{
       id: acc.id,
       object: "chat.completion",
@@ -345,25 +335,23 @@ defmodule ZaqWeb.ChatCompletionsController do
       choices: [
         %{
           index: 0,
-          message: %{role: "assistant", content: assembled(acc)},
+          message: %{role: "assistant", content: answer},
           finish_reason: finish_reason
         }
       ],
-      zaq_sources: sources_payload(acc.sources)
+      zaq_sources: sources_payload(sources)
     }
   end
 
-  defp stream_error(id, model, created, reason) do
+  defp stream_error(acc, reason) do
     %{
-      id: id,
+      id: acc.id,
       object: "chat.completion.chunk",
-      created: created,
-      model: model,
+      created: acc.created,
+      model: acc.model,
       error: %{message: error_message(reason), type: "server_error"}
     }
   end
-
-  defp assembled(%{buffer: buffer}), do: buffer |> Enum.reverse() |> Enum.join("")
 
   defp created_ts, do: System.system_time(:second)
 
@@ -397,7 +385,7 @@ defmodule ZaqWeb.ChatCompletionsController do
   end
 
   # First `system`-role message → per-run framing (OpenAI-standard). Prepended to
-  # the run question (see `run/4`), never persisted.
+  # the run question (see `run/5`), never persisted.
   defp system_content(params) do
     (fetch(params, "messages") || [])
     |> Enum.find_value(fn msg ->
@@ -461,16 +449,9 @@ defmodule ZaqWeb.ChatCompletionsController do
   end
 
   defp emit(conn, event) when is_map(event) do
-    {conn, _status} = emit_status(conn, event)
-    conn
-  end
-
-  # Emits a frame and reports whether the socket is still open, so the fold can
-  # halt when the client has disconnected (`{:error, :closed}` from chunk/2).
-  defp emit_status(conn, event) when is_map(event) do
     case chunk_out(conn, "data: #{Jason.encode!(event)}\n\n") do
-      {:ok, conn} -> {conn, :ok}
-      {:error, _reason} -> {conn, :closed}
+      {:ok, conn} -> conn
+      {:error, _reason} -> conn
     end
   end
 
@@ -489,8 +470,18 @@ defmodule ZaqWeb.ChatCompletionsController do
 
   defp error_message(:empty_answer), do: "Aucune réponse générée."
   defp error_message(:max_iterations_reached), do: "La recherche n'a pas abouti à une réponse."
+  defp error_message(:timeout), do: "La réponse a pris trop de temps. Veuillez réessayer."
   defp error_message(reason) when is_binary(reason), do: reason
   defp error_message(_reason), do: "Une erreur est survenue. Veuillez réessayer."
+
+  defp metadata_get(map, key) when is_map(map) and is_atom(key),
+    do: Map.get(map, key) || Map.get(map, Atom.to_string(key))
+
+  defp metadata_get(_map, _key), do: nil
+
+  defp node_router_module do
+    Application.get_env(:zaq, :chat_completions_node_router_module, Zaq.NodeRouter)
+  end
 
   defp fetch(map, key) when is_map(map), do: Map.get(map, key)
   defp fetch(_map, _key), do: nil

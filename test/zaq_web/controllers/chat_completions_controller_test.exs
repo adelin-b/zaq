@@ -128,4 +128,95 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     assert {:error, %Ecto.Changeset{}} =
              Conversations.create_chat_conversation(convo_id, "user-b")
   end
+
+  # ---------------------------------------------------------------------------
+  # Pipeline routing — the run flows through route_incoming_message/5 (like
+  # every other channel bridge) and the result comes back over ChatBridge
+  # PubSub as {:chat_result, request_id, outgoing}.
+  # ---------------------------------------------------------------------------
+
+  defmodule EchoRouter do
+    @moduledoc false
+    alias Zaq.Channels.ChatBridge
+    alias Zaq.Engine.Messages.{Incoming, Outgoing}
+
+    def dispatch(%Zaq.Event{request: %Incoming{} = incoming} = event) do
+      outgoing = %Outgoing{
+        body: "Réponse générée. [[source:doc.pdf]]",
+        channel_id: incoming.channel_id,
+        provider: :chat,
+        in_reply_to: incoming.message_id,
+        metadata:
+          Map.merge(incoming.metadata, %{
+            tool_calls: [
+              %{
+                "name" => "retrieve",
+                "response" => %{
+                  "chunks" => [
+                    %{"source" => "doc.pdf", "document_id" => "doc-1", "page" => 3}
+                  ]
+                }
+              }
+            ]
+          })
+      }
+
+      Phoenix.PubSub.broadcast(
+        Zaq.PubSub,
+        ChatBridge.topic(incoming.channel_id),
+        {:chat_result, incoming.message_id, outgoing}
+      )
+
+      %{event | response: nil}
+    end
+  end
+
+  defmodule SilentRouter do
+    @moduledoc false
+    def dispatch(%Zaq.Event{} = event), do: %{event | response: nil}
+  end
+
+  defp with_router(router) do
+    Application.put_env(:zaq, :chat_completions_node_router_module, router)
+    on_exit(fn -> Application.delete_env(:zaq, :chat_completions_node_router_module) end)
+  end
+
+  test "non-stream: pipeline result folds into an OpenAI completion with citations",
+       %{conn: conn} do
+    with_router(EchoRouter)
+
+    conn = post(authed(conn), @path, body(%{"stream" => false}))
+    resp = json_response(conn, 200)
+
+    assert %{"choices" => [%{"message" => %{"role" => "assistant", "content" => content}}]} =
+             resp
+
+    # Inline source markers are stripped — citations ride zaq_sources instead.
+    assert content == "Réponse générée."
+
+    assert [%{"sourceId" => "doc-1", "page" => 3, "url" => "/chat/documents/doc-1?page=3"}] =
+             Enum.map(resp["zaq_sources"], &Map.take(&1, ["sourceId", "page", "url"]))
+  end
+
+  test "stream: pipeline result arrives as delta frames + zaq_sources + [DONE]", %{conn: conn} do
+    with_router(EchoRouter)
+
+    conn = post(authed(conn), @path, body())
+
+    assert conn.status == 200
+    sse = response(conn, 200)
+    assert sse =~ ~s("delta":{"role":"assistant"})
+    assert sse =~ "Réponse générée."
+    assert sse =~ "zaq_sources"
+    assert sse =~ "data: [DONE]"
+  end
+
+  test "502 when no pipeline result arrives before the timeout", %{conn: conn} do
+    with_router(SilentRouter)
+    Application.put_env(:zaq, :chat_result_timeout_ms, 50)
+    on_exit(fn -> Application.delete_env(:zaq, :chat_result_timeout_ms) end)
+
+    conn = post(authed(conn), @path, body(%{"stream" => false}))
+    assert json_response(conn, 502)["error"]["message"] =~ "trop de temps"
+  end
 end
