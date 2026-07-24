@@ -778,7 +778,8 @@ defmodule Zaq.AgentTest do
 
   defp wait_for_idle_server(server_ref, attempts) do
     case Jido.AgentServer.status(server_ref) do
-      {:ok, %{raw_state: %{requests: requests}}} when is_map(requests) and map_size(requests) == 0 ->
+      {:ok, %{raw_state: %{requests: requests}}}
+      when is_map(requests) and map_size(requests) == 0 ->
         :ok
 
       _ ->
