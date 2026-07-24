@@ -216,7 +216,7 @@ test.describe("Agents", () => {
     await clickUntilVisible(page, '[phx-click="new_agent"]', "#configured-agent-form")
     await page.locator('input[name="configured_agent[name]"]').fill("Should Not Be Saved")
 
-    await page.locator('[phx-click="cancel_agent_form"]').click()
+    await page.locator("#close-agent-detail").click()
     await waitForLiveViewSettled(page)
 
     await expect(page.locator("#configured-agent-form")).not.toBeVisible()
