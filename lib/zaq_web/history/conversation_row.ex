@@ -5,7 +5,18 @@ defmodule ZaqWeb.History.ConversationRow do
 
   use ZaqWeb, :html
 
-  import ZaqWeb.Helpers.DateFormat, only: [format_datetime: 1]
+  import ZaqWeb.Components.DesignSystem.Table,
+    only: [
+      table_actions: 1,
+      table_badge: 1,
+      table_cell: 1,
+      table_checkbox: 1,
+      table_datetime: 1,
+      table_row: 1,
+      table_text: 1
+    ]
+
+  alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
 
   attr :conversation, :any,
     required: true,
@@ -17,30 +28,23 @@ defmodule ZaqWeb.History.ConversationRow do
 
   def conversation_row(assigns) do
     ~H"""
-    <tr
+    <.table_row
       id={"conv-#{@conversation.id}"}
-      class={[
-        "border-b border-black/5 last:border-0 hover:bg-black/[0.02]",
-        if(MapSet.member?(@selected, @conversation.id), do: "bg-[#03b6d4]/[0.03]", else: "")
-      ]}
+      variant={if(MapSet.member?(@selected, @conversation.id), do: :selected, else: :default)}
     >
-      <td class="w-10 px-4 py-4">
-        <input
-          type="checkbox"
+      <.table_cell width="w-10">
+        <.table_checkbox
+          checked={MapSet.member?(@selected, @conversation.id)}
           phx-click="toggle_select"
           phx-value-id={@conversation.id}
-          checked={MapSet.member?(@selected, @conversation.id)}
-          class="rounded border-black/20 text-[#03b6d4] cursor-pointer"
         />
-      </td>
+      </.table_cell>
 
-      <td class="px-4 py-4 max-w-xs">
-        <p class="font-mono text-sm text-black truncate">
-          {@conversation.title || "(untitled)"}
-        </p>
-      </td>
+      <.table_cell class="max-w-xs">
+        <.table_text label={@conversation.title || "(untitled)"} tone={:mono} truncate />
+      </.table_cell>
 
-      <td :if={@show_identity?} class="px-4 py-4">
+      <.table_cell :if={@show_identity?}>
         <.link
           :if={@conversation.person}
           navigate={~p"/bo/people?person_id=#{@conversation.person.id}"}
@@ -48,75 +52,71 @@ defmodule ZaqWeb.History.ConversationRow do
         >
           {@conversation.person.full_name}
         </.link>
-        <span
+        <.table_text
           :if={is_nil(@conversation.person) && @conversation.user}
-          class="font-mono text-[0.7rem] text-black/50"
-        >
-          {@conversation.user.username}
-        </span>
-        <span
+          label={@conversation.user.username}
+          tone={:secondary}
+          class="font-mono text-[0.7rem]"
+        />
+        <.table_text
           :if={
             is_nil(@conversation.person) && is_nil(@conversation.user) &&
               @conversation.channel_user_id
           }
-          class="font-mono text-[0.7rem] text-black/50"
-        >
-          {@conversation.channel_user_id}
-        </span>
-        <span
+          label={@conversation.channel_user_id}
+          tone={:secondary}
+          class="font-mono text-[0.7rem]"
+        />
+        <.table_text
           :if={
             is_nil(@conversation.person) && is_nil(@conversation.user) &&
               is_nil(@conversation.channel_user_id)
           }
-          class="font-mono text-[0.7rem] text-black/30"
-        >
-          —
-        </span>
-      </td>
+          label="—"
+          tone={:tertiary}
+          class="font-mono text-[0.7rem]"
+        />
+      </.table_cell>
 
-      <td class="px-4 py-4">
-        <span class="font-mono text-[0.7rem] px-2 py-1 rounded bg-black/5 text-black/50">
+      <.table_cell>
+        <.table_badge status="processing">
           {@conversation.channel_type}
-        </span>
-      </td>
+        </.table_badge>
+      </.table_cell>
 
-      <td class="font-mono text-sm text-black/40 px-4 py-4 whitespace-nowrap">
-        {format_datetime(@conversation.inserted_at)}
-      </td>
+      <.table_cell>
+        <.table_datetime value={@conversation.inserted_at} />
+      </.table_cell>
 
-      <td class="font-mono text-sm text-black/40 px-4 py-4 whitespace-nowrap">
-        {format_datetime(@conversation.updated_at)}
-      </td>
+      <.table_cell>
+        <.table_datetime value={@conversation.updated_at} />
+      </.table_cell>
 
-      <td class="px-4 py-4 text-right whitespace-nowrap">
-        <div class="flex items-center justify-end gap-3">
-          <button
+      <.table_cell align={:right} nowrap>
+        <.table_actions>
+          <DSButton.button
             :if={@live_action != :archived}
-            type="button"
+            variant={:tertiary}
             phx-click="archive_conversation"
             phx-value-id={@conversation.id}
-            class="font-mono text-[0.72rem] text-black/30 hover:text-black/60 transition-colors"
           >
             Archive
-          </button>
-          <button
-            type="button"
+          </DSButton.button>
+          <DSButton.button
+            variant={:tertiary}
+            danger
             phx-click="delete_conversation"
             phx-value-id={@conversation.id}
             data-confirm="Delete this conversation? This cannot be undone."
-            class="font-mono text-[0.72rem] text-red-400 hover:text-red-600 transition-colors"
           >
             Delete
-          </button>
-          <.link
-            navigate={~p"/bo/conversations/#{@conversation.id}"}
-            class="font-mono text-[0.75rem] text-[#03b6d4] hover:underline"
-          >
+          </DSButton.button>
+          <DSButton.button variant={:tertiary} navigate={~p"/bo/conversations/#{@conversation.id}"}>
             View →
-          </.link>
-        </div>
-      </td>
-    </tr>
+          </DSButton.button>
+        </.table_actions>
+      </.table_cell>
+    </.table_row>
     """
   end
 end

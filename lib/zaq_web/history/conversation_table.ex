@@ -5,6 +5,16 @@ defmodule ZaqWeb.History.ConversationTable do
 
   use Phoenix.Component
 
+  import ZaqWeb.Components.DesignSystem.Table,
+    only: [
+      table: 1,
+      table_cell: 1,
+      table_checkbox: 1,
+      table_empty: 1,
+      table_head_row: 1,
+      table_text: 1
+    ]
+
   import ZaqWeb.History.ConversationRow, only: [conversation_row: 1]
 
   attr :conversations, :list, required: true
@@ -14,69 +24,57 @@ defmodule ZaqWeb.History.ConversationTable do
   attr :filter_scope, :string, required: true
 
   def conversation_table(assigns) do
+    show_identity? = assigns.is_admin && assigns.filter_scope == "all"
+
     assigns =
-      assign(assigns, :show_identity?, assigns.is_admin && assigns.filter_scope == "all")
+      assigns
+      |> assign(:show_identity?, show_identity?)
+      |> assign(:empty_colspan, if(show_identity?, do: 7, else: 6))
 
     ~H"""
-    <div class="bg-white rounded-xl border border-black/10 overflow-hidden">
-      <div class="overflow-x-auto">
-        <table class="w-full min-w-[768px]">
-          <thead>
-            <tr class="border-b border-black/10">
-              <th class="w-10 px-4 py-3">
-                <input
-                  type="checkbox"
-                  phx-click="select_all"
-                  checked={
-                    @conversations != [] &&
-                      MapSet.equal?(@selected, @conversations |> Enum.map(& &1.id) |> MapSet.new())
-                  }
-                  class="rounded border-black/20 text-[#03b6d4] cursor-pointer"
-                />
-              </th>
-              <th class="text-left font-mono text-[0.7rem] text-black/40 uppercase tracking-wider px-4 py-3">
-                Conversation
-              </th>
-              <th
-                :if={@show_identity?}
-                class="text-left font-mono text-[0.7rem] text-black/40 uppercase tracking-wider px-4 py-3"
-              >
-                Identity
-              </th>
-              <th class="text-left font-mono text-[0.7rem] text-black/40 uppercase tracking-wider px-4 py-3">
-                Channel
-              </th>
-              <th class="text-left font-mono text-[0.7rem] text-black/40 uppercase tracking-wider px-4 py-3">
-                Started
-              </th>
-              <th class="text-left font-mono text-[0.7rem] text-black/40 uppercase tracking-wider px-4 py-3">
-                Updated
-              </th>
-              <th class="text-right font-mono text-[0.7rem] text-black/40 uppercase tracking-wider px-4 py-3">
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            <.conversation_row
-              :for={conv <- @conversations}
-              conversation={conv}
-              selected={@selected}
-              live_action={@live_action}
-              show_identity?={@show_identity?}
+    <.table id="history-conversations-table" min_width="768px" wrapper_class="overflow-x-auto">
+      <:head>
+        <.table_head_row>
+          <.table_cell element={:th} width="w-10">
+            <.table_checkbox
+              phx-click="select_all"
+              checked={
+                @conversations != [] &&
+                  MapSet.equal?(@selected, @conversations |> Enum.map(& &1.id) |> MapSet.new())
+              }
             />
-
-            <tr :if={@conversations == []}>
-              <td
-                colspan={if @show_identity?, do: "7", else: "6"}
-                class="px-6 py-12 text-center font-mono text-sm text-black/30"
-              >
-                No conversations found.
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+          </.table_cell>
+          <.table_cell element={:th}>
+            <.table_text label="Conversation" tone={:tertiary} />
+          </.table_cell>
+          <.table_cell :if={@show_identity?} element={:th}>
+            <.table_text label="Identity" tone={:tertiary} />
+          </.table_cell>
+          <.table_cell element={:th}>
+            <.table_text label="Channel" tone={:tertiary} />
+          </.table_cell>
+          <.table_cell element={:th}>
+            <.table_text label="Started" tone={:tertiary} />
+          </.table_cell>
+          <.table_cell element={:th}>
+            <.table_text label="Updated" tone={:tertiary} />
+          </.table_cell>
+          <.table_cell element={:th} align={:right} />
+        </.table_head_row>
+      </:head>
+      <:body>
+        <.table_empty :if={@conversations == []} colspan={@empty_colspan}>
+          No conversations found.
+        </.table_empty>
+        <.conversation_row
+          :for={conv <- @conversations}
+          conversation={conv}
+          selected={@selected}
+          live_action={@live_action}
+          show_identity?={@show_identity?}
+        />
+      </:body>
+    </.table>
     """
   end
 end
