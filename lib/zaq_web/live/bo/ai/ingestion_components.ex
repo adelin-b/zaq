@@ -57,6 +57,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionComponents do
   attr :selected_watched_count, :integer, default: 0
   attr :watch_supported, :boolean, default: true
   attr :watch_disabled_reason, :string, default: nil
+  attr :active_jobs_count, :integer, default: 0
 
   def file_browser_header(assigns) do
     IngestionFileBrowserHeader.file_browser_header(assigns)

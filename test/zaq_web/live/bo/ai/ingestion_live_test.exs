@@ -283,9 +283,21 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
   defp create_job(attrs) do
     %IngestJob{}
     |> IngestJob.changeset(
-      Map.merge(%{file_path: "notes.txt", status: "pending", mode: "async"}, attrs)
+      Map.merge(
+        %{file_path: "notes.txt", status: "pending", mode: "async", volume_name: "default"},
+        attrs
+      )
     )
     |> Repo.insert!()
+  end
+
+  defp open_jobs_drawer(view) do
+    if has_element?(view, "#ingestion-jobs-drawer") do
+      view
+    else
+      view |> element("#monitor-jobs-button") |> render_click()
+      view
+    end
   end
 
   defp create_document_with_chunk(source, attrs \\ %{}) do
@@ -2048,11 +2060,32 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
     end
   end
 
+  test "opens and closes the jobs drawer from the monitor jobs button", %{conn: conn} do
+    create_job(%{file_path: "drawer-job.txt", status: "pending"})
+
+    {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
+
+    refute has_element?(view, "#ingestion-jobs-drawer")
+    assert has_element?(view, "#monitor-jobs-button", "Monitor jobs (1 active)")
+
+    view = open_jobs_drawer(view)
+
+    assert has_element?(view, "#ingestion-jobs-drawer")
+    assert has_element?(view, "p", "drawer-job.txt")
+
+    view
+    |> element("#ingestion-jobs-drawer button[aria-label='Close drawer']")
+    |> render_click()
+
+    refute has_element?(view, "#ingestion-jobs-drawer")
+  end
+
   test "filters jobs, handles retry/cancel branches, and refreshes on job updates", %{conn: conn} do
     pending = create_job(%{file_path: "pending.txt", status: "pending"})
     completed = create_job(%{file_path: "completed.txt", status: "completed"})
 
     {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
+    view = open_jobs_drawer(view)
 
     render_hook(view, "filter_status", %{"status" => "pending"})
     assert has_element?(view, "p", "pending.txt")
@@ -2079,6 +2112,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
     create_job(%{file_path: "completed-other.txt", status: "completed"})
 
     {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
+    view = open_jobs_drawer(view)
 
     render_hook(view, "filter_status", %{"status" => "others"})
 
@@ -2101,6 +2135,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
       })
 
     {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
+    view = open_jobs_drawer(view)
 
     assert has_element?(view, "p", "partial.txt")
     assert has_element?(view, "p", "Chunks: 7/10")
@@ -2501,6 +2536,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
       create_job(%{file_path: "c.txt", status: "completed"})
 
       {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
+      view = open_jobs_drawer(view)
 
       render_hook(view, "filter_status", %{"status" => "pending"})
       refute has_element?(view, "p", "c.txt")
@@ -2566,6 +2602,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
       create_job(%{file_path: "a-completed.txt", status: "completed"})
 
       {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
+      view = open_jobs_drawer(view)
 
       render_hook(view, "filter_status", %{"status" => "unknown_status"})
 
@@ -2749,6 +2786,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       send(view.pid, {:job_updated, processing_job})
 
+      view = open_jobs_drawer(view)
       # View must still be alive and not crash
       assert has_element?(view, "p", "notes.txt")
     end
@@ -2780,6 +2818,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
       render_hook(view, "filter_status", %{"status" => "pending"})
+      view = open_jobs_drawer(view)
 
       assert has_element?(view, "p", "filtered-away.txt")
 
@@ -2808,6 +2847,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       {:ok, view, _html} = live(conn, ~p"/bo/ingestion")
       render_hook(view, "filter_status", %{"status" => "others"})
+      view = open_jobs_drawer(view)
 
       assert has_element?(view, "p", "others-pending.txt")
       refute has_element?(view, "p", "others-failed.txt")
@@ -2872,6 +2912,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
          }}
       )
 
+      view = open_jobs_drawer(view)
       html = render(view)
       assert html =~ "Preparing"
       assert html =~ "describing images 1/3"
@@ -2888,6 +2929,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
         {:job_progress, job.id, %{"current" => 1, "total" => 2, "status" => "processing"}}
       )
 
+      view = open_jobs_drawer(view)
       assert render(view) =~ "Preparing"
 
       # Chunks scheduled: the job leaves the prep phase.
@@ -2898,6 +2940,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       send(view.pid, {:job_updated, scheduled})
 
+      view = open_jobs_drawer(view)
       refute render(view) =~ "Preparing"
     end
 
@@ -2911,6 +2954,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
         {:job_progress, job.id, %{"current" => 2, "total" => 2, "status" => "completed"}}
       )
 
+      view = open_jobs_drawer(view)
       assert render(view) =~ "Preparing"
 
       completed =
@@ -2934,6 +2978,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
         {:job_progress, job.id, %{"current" => 1, "total" => 2, "status" => "processing"}}
       )
 
+      view = open_jobs_drawer(view)
       assert render(view) =~ "Preparing"
 
       # A retriable failure sends the job back to "pending" during Oban backoff.
@@ -2958,6 +3003,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
         {:job_progress, job.id, %{"current" => 1, "total" => 2, "status" => "processing"}}
       )
 
+      view = open_jobs_drawer(view)
       assert render(view) =~ "Preparing"
 
       completed =
@@ -2975,6 +3021,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       state = :sys.get_state(view.pid)
       refute Map.has_key?(state.socket.assigns.prep_progress, job.id)
+      view = open_jobs_drawer(view)
       refute render(view) =~ "Preparing"
     end
 
@@ -2992,6 +3039,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
          %{"stage" => "image_to_text", "current" => 2, "total" => 3, "status" => "processing"}}
       )
 
+      view = open_jobs_drawer(view)
       assert render(view) =~ "describing images 2/3"
 
       # No terminal broadcast ever arrives (orphaned job). With a zero TTL the
@@ -3001,6 +3049,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
       state = :sys.get_state(view.pid)
       refute Map.has_key?(state.socket.assigns.prep_progress, job.id)
       refute Map.has_key?(state.socket.assigns.prep_seen_at, job.id)
+      view = open_jobs_drawer(view)
       refute render(view) =~ "describing images 2/3"
     end
 
@@ -3020,6 +3069,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       state = :sys.get_state(view.pid)
       assert Map.has_key?(state.socket.assigns.prep_progress, job.id)
+      view = open_jobs_drawer(view)
       assert render(view) =~ "describing images 1/3"
     end
 

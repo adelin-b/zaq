@@ -90,6 +90,14 @@
   height: 66.666vh;
 }
 
+/* Responsive one-third — full width below lg so job cards remain readable */
+@media (max-width: 1023px) {
+  .zaq-drawer-panel.zaq-drawer--right.zaq-drawer--responsive-one-third,
+  .zaq-drawer-panel.zaq-drawer--left.zaq-drawer--responsive-one-third {
+    width: 100vw;
+  }
+}
+
 /* Header — mirrors modal header rhythm */
 .zaq-drawer-header {
   flex-shrink: 0;

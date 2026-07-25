@@ -9,80 +9,99 @@
 >
   <.ingestion_embedding_banner :if={not @embedding_ready} />
 
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-    <%!-- =============== LEFT: File Browser + Upload =============== --%>
-    <div class="lg:col-span-2 space-y-6 min-w-0">
-      <.volume_selector
-        :if={map_size(@volumes) > 1 or @data_source_sources != []}
-        volumes={@volumes}
-        current_volume={@current_volume}
-        current_provider={@provider}
-        data_sources={@data_source_sources}
-      />
+  <div class="space-y-6 min-w-0">
+    <.volume_selector
+      :if={map_size(@volumes) > 1 or @data_source_sources != []}
+      volumes={@volumes}
+      current_volume={@current_volume}
+      current_provider={@provider}
+      data_sources={@data_source_sources}
+    />
 
-      <div>
-        <div class="zaq-ingestion-chrome-row zaq-ingestion-chrome-row--spaced">
-          <.toggle
-            value={@view_mode}
-            event="toggle_view_mode"
-            value_param="mode"
-            suffix={"#{length(@entries)} item(s)"}
-            choices={[
-              %{value: "list", icon: "hero-bars-3", title: "List view"},
-              %{value: "grid", icon: "hero-squares-2x2", title: "Grid view"}
-            ]}
-          />
-          <.file_browser_header
-            selected={@selected}
-            ingest_mode={@ingest_mode}
-            embedding_ready={@embedding_ready}
-            provider_mode={@provider != "local"}
-            selected_watchable_count={
-              selected_watchable_count(@selected, @records_by_path, @ingestion_map)
-            }
-            selected_watched_count={
-              selected_watched_count(@selected, @records_by_path, @ingestion_map)
-            }
-            watch_supported={@watch_supported}
-            watch_disabled_reason={@watch_disabled_reason}
-          />
-        </div>
-        <p
-          :if={@provider_error}
-          class="zaq-text-body-sm mb-3"
-          style="color: var(--zaq-text-color-body-danger)"
-        >
-          {@provider_error}
-        </p>
-        <.breadcrumb breadcrumbs={@breadcrumbs} current_dir={@current_dir} />
-        <.file_list_view
-          :if={@view_mode == "list"}
-          entries={@entries}
-          selected={@selected}
-          current_dir={@current_dir}
-          current_volume={@current_volume}
-          ingestion_map={@ingestion_map}
-          provider_mode={@provider != "local"}
-          watch_supported={@watch_supported}
-          watch_disabled_reason={@watch_disabled_reason}
+    <div>
+      <div class="zaq-ingestion-chrome-row zaq-ingestion-chrome-row--spaced">
+        <.toggle
+          value={@view_mode}
+          event="toggle_view_mode"
+          value_param="mode"
+          suffix={"#{length(@entries)} item(s)"}
+          choices={[
+            %{value: "list", icon: "hero-bars-3", title: "List view"},
+            %{value: "grid", icon: "hero-squares-2x2", title: "Grid view"}
+          ]}
         />
-        <.file_grid_view
-          :if={@view_mode == "grid"}
-          entries={@entries}
+        <.file_browser_header
           selected={@selected}
-          current_dir={@current_dir}
-          current_volume={@current_volume}
-          ingestion_map={@ingestion_map}
+          ingest_mode={@ingest_mode}
+          embedding_ready={@embedding_ready}
           provider_mode={@provider != "local"}
+          selected_watchable_count={
+            selected_watchable_count(@selected, @records_by_path, @ingestion_map)
+          }
+          selected_watched_count={
+            selected_watched_count(@selected, @records_by_path, @ingestion_map)
+          }
           watch_supported={@watch_supported}
           watch_disabled_reason={@watch_disabled_reason}
+          active_jobs_count={active_jobs_count(@jobs)}
         />
       </div>
+      <p
+        :if={@provider_error}
+        class="zaq-text-body-sm mb-3"
+        style="color: var(--zaq-text-color-body-danger)"
+      >
+        {@provider_error}
+      </p>
+      <.breadcrumb breadcrumbs={@breadcrumbs} current_dir={@current_dir} />
+      <.file_list_view
+        :if={@view_mode == "list"}
+        entries={@entries}
+        selected={@selected}
+        current_dir={@current_dir}
+        current_volume={@current_volume}
+        ingestion_map={@ingestion_map}
+        provider_mode={@provider != "local"}
+        watch_supported={@watch_supported}
+        watch_disabled_reason={@watch_disabled_reason}
+      />
+      <.file_grid_view
+        :if={@view_mode == "grid"}
+        entries={@entries}
+        selected={@selected}
+        current_dir={@current_dir}
+        current_volume={@current_volume}
+        ingestion_map={@ingestion_map}
+        provider_mode={@provider != "local"}
+        watch_supported={@watch_supported}
+        watch_disabled_reason={@watch_disabled_reason}
+      />
     </div>
-
-    <%!-- =============== RIGHT: Ingestion Jobs =============== --%>
-    <.jobs_panel jobs={@jobs} status_filter={@status_filter} prep_progress={@prep_progress} />
   </div>
+
+  <Drawer.drawer
+    id="ingestion-jobs-drawer"
+    is_open={@jobs_drawer_open}
+    on_close="close_jobs_drawer"
+    placement={:right}
+    size={:one_third}
+    return_focus_id="monitor-jobs-button"
+    panel_class="zaq-drawer--responsive-one-third"
+    padding={:flush}
+  >
+    <:header>
+      <h3
+        id="ingestion-jobs-drawer-title"
+        class="zaq-text-h3"
+        style="color: var(--zaq-text-color-body-default)"
+      >
+        Jobs
+      </h3>
+    </:header>
+    <div class="p-4">
+      <.jobs_panel jobs={@jobs} status_filter={@status_filter} prep_progress={@prep_progress} />
+    </div>
+  </Drawer.drawer>
 
   <%!-- ——— Modals ——— --%>
   <.modal_add_raw

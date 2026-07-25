@@ -19,6 +19,7 @@ defmodule ZaqWeb.Components.DesignSystem.IngestionFileBrowserHeader do
   attr :selected_watched_count, :integer, default: 0
   attr :watch_supported, :boolean, default: true
   attr :watch_disabled_reason, :string, default: nil
+  attr :active_jobs_count, :integer, default: 0
 
   def file_browser_header(assigns) do
     ~H"""
@@ -102,6 +103,14 @@ defmodule ZaqWeb.Components.DesignSystem.IngestionFileBrowserHeader do
         {mode}
       </button>
       <.button
+        id="monitor-jobs-button"
+        variant={:secondary}
+        icon="hero-queue-list"
+        phx-click="open_jobs_drawer"
+      >
+        Monitor jobs{active_jobs_label(@active_jobs_count)}
+      </.button>
+      <.button
         id="ingest-selected-button"
         variant={:primary}
         phx-click="ingest_selected"
@@ -112,4 +121,7 @@ defmodule ZaqWeb.Components.DesignSystem.IngestionFileBrowserHeader do
     </div>
     """
   end
+
+  defp active_jobs_label(0), do: ""
+  defp active_jobs_label(count), do: " (#{count} active)"
 end

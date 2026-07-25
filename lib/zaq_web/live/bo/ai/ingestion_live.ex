@@ -20,6 +20,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
   alias Zaq.NodeRouter
   alias Zaq.Repo
   alias Zaq.System
+  alias ZaqWeb.Components.Drawer
   alias ZaqWeb.Live.BO.PreviewHelpers
 
   import Ecto.Query
@@ -72,6 +73,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
        # stale bars left behind by an orphaned (never-finalized) job.
        prep_seen_at: %{},
        status_filter: "all",
+       jobs_drawer_open: false,
        ingest_mode: "async",
        # Volume state
        volumes: volumes,
@@ -883,8 +885,17 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
       |> assign(selected: MapSet.new())
       |> load_jobs()
       |> put_ingest_result_flash(result)
+      |> maybe_open_jobs_drawer_after_ingest(result)
 
     {:noreply, socket}
+  end
+
+  def handle_event("open_jobs_drawer", _params, socket) do
+    {:noreply, assign(socket, :jobs_drawer_open, true)}
+  end
+
+  def handle_event("close_jobs_drawer", _params, socket) do
+    {:noreply, assign(socket, :jobs_drawer_open, false)}
   end
 
   def handle_event("retry_job", %{"id" => id}, socket) do
@@ -2110,6 +2121,19 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
   end
 
   defp put_ingest_result_flash(socket, _), do: put_flash(socket, :error, "Ingestion failed.")
+
+  defp maybe_open_jobs_drawer_after_ingest(socket, {:ok, _jobs}),
+    do: assign(socket, :jobs_drawer_open, true)
+
+  defp maybe_open_jobs_drawer_after_ingest(socket, {:error, {:partial_failure, jobs, _errors}})
+       when jobs != [],
+       do: assign(socket, :jobs_drawer_open, true)
+
+  defp maybe_open_jobs_drawer_after_ingest(socket, _result), do: socket
+
+  def active_jobs_count(jobs) when is_list(jobs) do
+    Enum.count(jobs, &(&1.status in ~w(pending processing)))
+  end
 
   defp assign_breadcrumbs(socket, "."), do: assign(socket, breadcrumbs: [])
 

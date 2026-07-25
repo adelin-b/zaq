@@ -40,7 +40,7 @@ defmodule ZaqWeb.Components.DesignSystem.IngestionJobsPanel do
         />
       </div>
 
-      <div class="space-y-2 max-h-[80vh] overflow-y-auto">
+      <div class="space-y-2">
         <div
           :if={@jobs == []}
           class="zaq-card-default zaq-border-default text-center"
