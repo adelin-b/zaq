@@ -8,6 +8,8 @@ defmodule ZaqWeb.History.ConversationFilters do
 
   import ZaqWeb.Components.SearchableSelect
 
+  alias ZaqWeb.Components.DesignSystem.Toggle, as: DSToggle
+
   attr :conversation_count, :integer, required: true
   attr :is_admin, :boolean, required: true
   attr :filter_scope, :string, required: true
@@ -18,44 +20,30 @@ defmodule ZaqWeb.History.ConversationFilters do
   attr :people, :list, required: true
 
   def conversation_filters(assigns) do
+    assigns =
+      assign(assigns, :count_suffix, "#{assigns.conversation_count} conversations")
+
     ~H"""
-    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
-      <p class="font-mono text-sm text-black/50">{@conversation_count} conversations</p>
+    <div class="zaq-ingestion-chrome-row zaq-ingestion-chrome-row--spaced">
+      <DSToggle.toggle
+        :if={@is_admin}
+        value={@filter_scope}
+        event="filter"
+        value_param="scope"
+        suffix={@count_suffix}
+        choices={[
+          %{value: "own", label: "My History"},
+          %{value: "all", label: "All Users"}
+        ]}
+      />
+      <span :if={not @is_admin} class="zaq-text-caption zaq-toggle-count">
+        {@count_suffix}
+      </span>
 
-      <form phx-change="filter" class="flex flex-wrap items-center gap-3">
-        <div :if={@is_admin} class="flex items-center gap-1 p-0.5 bg-black/5 rounded-lg">
-          <button
-            type="button"
-            phx-click="filter"
-            phx-value-scope="own"
-            phx-value-channel_type={@filter_channel_type}
-            class={[
-              "font-mono text-[0.7rem] px-3 py-1.5 rounded-md transition-all",
-              if(@filter_scope == "own",
-                do: "bg-white text-[#2c3a50] shadow-sm",
-                else: "text-black/40 hover:text-black/60"
-              )
-            ]}
-          >
-            My History
-          </button>
-          <button
-            type="button"
-            phx-click="filter"
-            phx-value-scope="all"
-            phx-value-channel_type={@filter_channel_type}
-            class={[
-              "font-mono text-[0.7rem] px-3 py-1.5 rounded-md transition-all",
-              if(@filter_scope == "all",
-                do: "bg-white text-[#2c3a50] shadow-sm",
-                else: "text-black/40 hover:text-black/60"
-              )
-            ]}
-          >
-            All Users
-          </button>
-        </div>
-
+      <form
+        phx-change="filter"
+        class="zaq-ingestion-chrome-actions zaq-ingestion-chrome-actions--end flex flex-wrap items-center gap-3"
+      >
         <div :if={@is_admin && @filter_scope == "all"} class="flex items-center gap-1.5">
           <label class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider whitespace-nowrap">
             Team

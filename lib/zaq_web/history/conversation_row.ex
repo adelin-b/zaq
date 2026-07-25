@@ -30,6 +30,7 @@ defmodule ZaqWeb.History.ConversationRow do
     ~H"""
     <.table_row
       id={"conv-#{@conversation.id}"}
+      navigate={~p"/bo/conversations/#{@conversation.id}"}
       variant={if(MapSet.member?(@selected, @conversation.id), do: :selected, else: :default)}
     >
       <.table_cell width="w-10">
@@ -49,6 +50,7 @@ defmodule ZaqWeb.History.ConversationRow do
           :if={@conversation.person}
           navigate={~p"/bo/people?person_id=#{@conversation.person.id}"}
           class="font-mono text-[0.7rem] text-[#03b6d4] hover:underline"
+          onclick="event.stopPropagation()"
         >
           {@conversation.person.full_name}
         </.link>
@@ -110,9 +112,6 @@ defmodule ZaqWeb.History.ConversationRow do
             data-confirm="Delete this conversation? This cannot be undone."
           >
             Delete
-          </DSButton.button>
-          <DSButton.button variant={:tertiary} navigate={~p"/bo/conversations/#{@conversation.id}"}>
-            View →
           </DSButton.button>
         </.table_actions>
       </.table_cell>
