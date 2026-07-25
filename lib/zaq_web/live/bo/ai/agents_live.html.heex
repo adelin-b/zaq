@@ -20,8 +20,14 @@
             Manage BO-defined agents and choose which ones can be selected in chat.
           </p>
         </div>
-        <DSButton.button id="new-agent-button" variant={:primary} phx-click="new_agent">
-          New Agent
+        <DSButton.button
+          id="new-agent-button"
+          variant={:primary}
+          icon="hero-plus"
+          class="shrink-0"
+          phx-click="new_agent"
+        >
+          Add Agent
         </DSButton.button>
       </div>
 
