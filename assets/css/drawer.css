@@ -148,5 +148,5 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  gap: var(--zaq-layout-stack-gap);
+  gap: var(--zaq-layout-inline-gap);
 }

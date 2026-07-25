@@ -20,13 +20,9 @@
             Manage BO-defined agents and choose which ones can be selected in chat.
           </p>
         </div>
-        <button
-          id="new-agent-button"
-          phx-click="new_agent"
-          class="zaq-btn zaq-btn-primary"
-        >
+        <DSButton.button id="new-agent-button" variant={:primary} phx-click="new_agent">
           New Agent
-        </button>
+        </DSButton.button>
       </div>
 
       <form
@@ -338,15 +334,15 @@
             <label class="zaq-field-label-uppercase block">
               MCP Endpoints
             </label>
-            <button
+            <DSButton.button
               id="add-mcp-button"
+              variant={:secondary}
               type="button"
               phx-click="open_mcp_picker"
-              class="zaq-btn zaq-btn-secondary"
               disabled={@selected_model_supports_tools == false}
             >
               + Add MCP
-            </button>
+            </DSButton.button>
           </div>
           <div
             :if={@mcp_notice || @mcp_endpoints == []}
@@ -395,15 +391,15 @@
             <label class="zaq-field-label-uppercase block">
               Enabled Tools
             </label>
-            <button
+            <DSButton.button
               id="add-tools-button"
+              variant={:secondary}
               type="button"
               phx-click="open_tools_picker"
-              class="zaq-btn zaq-btn-secondary"
               disabled={@selected_model_supports_tools == false or unselected_tool_options == []}
             >
               + Add tools
-            </button>
+            </DSButton.button>
           </div>
           <input type="hidden" name="configured_agent[enabled_tool_keys][]" value="" />
           <input
@@ -438,15 +434,15 @@
             <label class="zaq-field-label-uppercase block">
               Skills
             </label>
-            <button
+            <DSButton.button
               id="add-skills-button"
+              variant={:secondary}
               type="button"
               phx-click="open_skills_picker"
-              class="zaq-btn zaq-btn-secondary"
               disabled={unselected_skill_options == []}
             >
               + Add skills
-            </button>
+            </DSButton.button>
           </div>
           <input type="hidden" name="configured_agent[enabled_skill_ids][]" value="" />
           <input
@@ -686,32 +682,43 @@
       </.form>
 
       <:actions>
-        <button
-          id="close-agent-detail"
-          type="button"
-          phx-click="cancel_agent_form"
-          class="zaq-btn zaq-btn-secondary"
-        >
-          Cancel
-        </button>
-        <button
-          id="save-agent-button"
-          type="submit"
-          form="configured-agent-form"
-          class="zaq-btn zaq-btn-primary"
-        >
-          {if @mode == :new, do: "Create Agent", else: "Save Agent"}
-        </button>
-        <button
-          :if={@mode == :edit and is_integer(@selected_agent_id)}
-          id="delete-agent-button"
-          type="button"
-          phx-click="delete_agent"
-          phx-value-id={@selected_agent_id}
-          class="zaq-btn zaq-btn-tertiary zaq-btn-danger"
-        >
-          Delete Agent
-        </button>
+        <div class={[
+          "flex w-full items-center",
+          if(@mode == :edit and is_integer(@selected_agent_id),
+            do: "justify-between",
+            else: "justify-end"
+          )
+        ]}>
+          <DSButton.button
+            :if={@mode == :edit and is_integer(@selected_agent_id)}
+            id="delete-agent-button"
+            variant={:tertiary}
+            danger
+            type="button"
+            phx-click="delete_agent"
+            phx-value-id={@selected_agent_id}
+          >
+            Delete Agent
+          </DSButton.button>
+          <div class="zaq-layout-inline">
+            <DSButton.button
+              id="close-agent-detail"
+              variant={:secondary}
+              type="button"
+              phx-click="cancel_agent_form"
+            >
+              Cancel
+            </DSButton.button>
+            <DSButton.button
+              id="save-agent-button"
+              variant={:primary}
+              type="submit"
+              form="configured-agent-form"
+            >
+              {if @mode == :new, do: "Create Agent", else: "Save Agent"}
+            </DSButton.button>
+          </div>
+        </div>
       </:actions>
     </Drawer.form_drawer>
 

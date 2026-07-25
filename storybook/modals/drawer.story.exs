@@ -51,8 +51,12 @@ defmodule Storybook.Modals.Drawer do
             <.input name="demo[name]" label="Name" value="Example" />
             <.input name="demo[description]" type="textarea" label="Description" value="" rows="3" />
             <:actions>
-              <.button variant={:secondary} phx-click={@close_event}>Cancel</.button>
-              <.button variant={:primary}>Save</.button>
+              <div class="flex w-full items-center justify-end">
+                <div class="zaq-layout-inline">
+                  <.button variant={:secondary} phx-click={@close_event}>Cancel</.button>
+                  <.button variant={:primary}>Save</.button>
+                </div>
+              </div>
             </:actions>
           </.form_drawer>
         </.preview_frame>
