@@ -348,37 +348,21 @@ defmodule ZaqWeb.Live.BO.AI.AgentsLive do
       )
 
     case dispatch_event(socket, event) do
-      {:ok, %ConfiguredAgent{} = agent} ->
+      {:ok, %ConfiguredAgent{} = _agent} ->
         socket =
           socket
           |> put_flash(:info, "Agent created")
-          |> assign(:mode, :edit)
-          |> assign(:selected_agent_id, agent.id)
-          |> assign(:selected_agent, agent)
-          |> assign(:advanced_options_error, nil)
-          |> assign(:form_notice, nil)
-          |> assign(:advanced_options_json, pretty_json(agent.advanced_options || %{}))
-          |> assign_changeset(Agent.change_agent(agent))
-          |> assign(:model_options, model_options_for_credential(agent.credential_id, socket))
-          |> assign(:mcp_endpoints, MCP.list_mcp_endpoints())
+          |> close_form()
           |> refresh_agents()
 
         {:noreply, socket}
 
-      {:ok, %{agent: agent} = payload} ->
+      {:ok, %{agent: _agent} = payload} ->
         socket =
           socket
           |> put_flash(:info, "Agent created")
           |> maybe_put_runtime_warnings(payload)
-          |> assign(:mode, :edit)
-          |> assign(:selected_agent_id, agent.id)
-          |> assign(:selected_agent, agent)
-          |> assign(:advanced_options_error, nil)
-          |> assign(:form_notice, nil)
-          |> assign(:advanced_options_json, pretty_json(agent.advanced_options || %{}))
-          |> assign_changeset(Agent.change_agent(agent))
-          |> assign(:model_options, model_options_for_credential(agent.credential_id, socket))
-          |> assign(:mcp_endpoints, MCP.list_mcp_endpoints())
+          |> close_form()
           |> refresh_agents()
 
         {:noreply, socket}

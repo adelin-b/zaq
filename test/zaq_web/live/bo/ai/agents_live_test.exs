@@ -741,7 +741,7 @@ defmodule ZaqWeb.Live.BO.AI.AgentsLiveTest do
              agent.name == agent_name and agent.max_iterations == 2
            end)
 
-    assert has_element?(view, "#configured_agent_max_iterations[value='2']")
+    refute has_element?(view, "#agent-form-drawer")
   end
 
   test "does not show field validation errors on change before save", %{conn: conn} do
@@ -1750,10 +1750,9 @@ defmodule ZaqWeb.Live.BO.AI.AgentsLiveTest do
       {:noreply, socket} =
         AgentsLive.handle_event("save", %{"configured_agent" => valid_attrs}, socket)
 
-      assert socket.assigns.mode == :edit
-      assert socket.assigns.selected_agent_id == agent.id
-      assert socket.assigns.selected_agent == agent
-      assert socket.assigns.advanced_options_json =~ "temperature"
+      assert socket.assigns.mode == :idle
+      assert socket.assigns.selected_agent_id == nil
+      assert socket.assigns.selected_agent == nil
       assert Phoenix.Flash.get(socket.assigns.flash, :info) =~ "Agent created"
     end)
   end

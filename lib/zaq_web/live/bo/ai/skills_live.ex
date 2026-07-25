@@ -24,6 +24,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLive do
   alias Zaq.NodeRouter
   alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
   alias ZaqWeb.Components.DesignSystem.Table, as: DSTable
+  alias ZaqWeb.Components.Drawer
 
   @impl true
   def mount(_params, _session, socket) do
@@ -78,7 +79,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLive do
     {:noreply, assign(socket, :body_preview, mode == "preview")}
   end
 
-  def handle_event("cancel_form", _params, socket) do
+  def handle_event("cancel_skill_form", _params, socket) do
     {:noreply, reset_form(socket)}
   end
 
@@ -198,15 +199,11 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLive do
       )
 
     case node_router().dispatch(event).response do
-      {:ok, %Skill{} = skill} ->
+      {:ok, %Skill{} = _skill} ->
         socket =
           socket
           |> put_flash(:info, "Skill created")
-          |> assign(:mode, :edit)
-          |> assign(:selected_skill, skill)
-          |> assign(:form_tool_keys, skill.tool_keys || [])
-          |> assign(:form_mcp_endpoint_ids, skill.enabled_mcp_endpoint_ids || [])
-          |> assign_changeset(Skills.change_skill(skill))
+          |> reset_form()
           |> refresh_skills()
 
         {:noreply, socket}

@@ -76,7 +76,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
     assert html =~ "Agent Skills"
     assert html =~ "No skills found."
     assert has_element?(view, "#new-skill-button")
-    refute has_element?(view, "#skill-form")
+    refute has_element?(view, "#skill-form-drawer")
   end
 
   test "lists existing skills with tags and status", %{conn: conn} do
@@ -119,7 +119,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
     {:ok, view, _html} = live(conn, ~p"/bo/skills")
 
     render_click(element(view, "#new-skill-button"))
-    assert has_element?(view, "#skill-form")
+    assert has_element?(view, "#skill-form-drawer")
 
     render_click(element(view, "#add-tools-button"))
     assert has_element?(view, "#skill-tools-picker-modal")
@@ -139,6 +139,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
     |> render_submit()
 
     assert render(view) =~ "Skill created"
+    refute has_element?(view, "#skill-form-drawer")
 
     assert [skill] = Skills.search_skills(%{q: "created-skill"})
     assert skill.tool_keys == ["answering.search_knowledge_base"]
@@ -220,7 +221,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
     {:ok, view, _html} = live(conn, ~p"/bo/skills")
 
     render_click(element(view, "#skill-row-#{skill.id}"))
-    assert has_element?(view, "#skill-form")
+    assert has_element?(view, "#skill-form-drawer")
     assert render(view) =~ "Edit Skill"
 
     view
@@ -401,6 +402,8 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
     assert skill.enabled_mcp_endpoint_ids == [endpoint.id]
 
     # remove it again from the selected panel and re-save
+    render_click(element(view, "#skill-row-#{skill.id}"))
+
     view
     |> element(~s(button[phx-click="remove_mcp"][phx-value-id="#{endpoint.id}"]))
     |> render_click()
@@ -466,7 +469,8 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/bo/skills")
 
-    render_click(element(view, "#delete-skill-#{skill.id}"))
+    render_click(element(view, "#skill-row-#{skill.id}"))
+    render_click(element(view, "#delete-skill-button"))
 
     assert render(view) =~ "Skill deleted"
     assert Skills.get_skill(skill.id) == nil
@@ -481,7 +485,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
     html = render_click(view, "select_skill", %{"id" => to_string(skill.id)})
 
     assert html =~ "Skill not found"
-    refute has_element?(view, "#skill-form")
+    refute has_element?(view, "#skill-form-drawer")
   end
 
   test "validation handles list tags and saving without tags defaults to empty list", %{
@@ -502,7 +506,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
 
     assert html =~ "alpha, beta"
 
-    render_click(element(view, "button[phx-click=cancel_form]"))
+    render_click(element(view, "#close-skill-detail"))
     render_click(element(view, "#new-skill-button"))
 
     view
@@ -645,10 +649,10 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
     {:ok, view, _html} = live(conn, ~p"/bo/skills")
 
     render_click(element(view, "#new-skill-button"))
-    assert has_element?(view, "#skill-form")
+    assert has_element?(view, "#skill-form-drawer")
 
-    render_click(element(view, "button[phx-click=cancel_form]"))
-    refute has_element?(view, "#skill-form")
+    render_click(element(view, "#close-skill-detail"))
+    refute has_element?(view, "#skill-form-drawer")
   end
 
   test "delete shows router failures", %{conn: conn} do
@@ -657,7 +661,9 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
 
     {:ok, view, _html} = live(conn, ~p"/bo/skills")
 
-    html = render_click(element(view, "#delete-skill-#{skill.id}"))
+    render_click(element(view, "#skill-row-#{skill.id}"))
+
+    html = render_click(element(view, "#delete-skill-button"))
 
     assert html =~ "Failed to delete skill: :delete_failed"
     assert Skills.get_skill(skill.id)
