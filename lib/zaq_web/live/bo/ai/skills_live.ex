@@ -22,6 +22,7 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLive do
   alias Zaq.Agent.Tools.Registry
   alias Zaq.Event
   alias Zaq.NodeRouter
+  alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
   alias ZaqWeb.Components.DesignSystem.Table, as: DSTable
 
   @impl true

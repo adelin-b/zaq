@@ -202,9 +202,13 @@
 
 .zaq-btn-secondary:disabled,
 .zaq-btn-secondary[aria-disabled="true"] {
-  background-color: var(--zaq-btn-secondary-color-bg-disabled);
-  color:            var(--zaq-btn-secondary-color-text-disabled);
-  border-color:     var(--zaq-btn-secondary-color-border-disabled);
+  appearance:         none;
+  -webkit-appearance: none;
+  opacity:            1;
+  background-color:   var(--zaq-btn-secondary-color-bg-disabled);
+  color:              var(--zaq-btn-secondary-color-text-disabled);
+  border:             var(--zaq-btn-secondary-thickness-border-resting) solid
+                      var(--zaq-btn-secondary-color-border-disabled);
 }
 
 /* ── Ghost ───────────────────────────────────────────────────────────────── */

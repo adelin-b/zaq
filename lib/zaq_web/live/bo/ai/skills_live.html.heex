@@ -13,14 +13,15 @@
         Reusable instruction + tool bundles attachable to any agent
       </p>
     </div>
-    <button
+    <DSButton.button
       id="new-skill-button"
-      type="button"
+      variant={:primary}
+      icon="hero-plus"
+      class="shrink-0"
       phx-click="new_skill"
-      class="zaq-btn zaq-btn-primary"
     >
-      + New skill
-    </button>
+      Add Skill
+    </DSButton.button>
   </div>
   
 <!-- Filters -->
@@ -125,17 +126,17 @@
             </DSTable.table_cell>
             <DSTable.table_cell align={:right}>
               <DSTable.table_actions>
-                <button
+                <DSButton.button
                   id={"delete-skill-#{skill.id}"}
+                  variant={:tertiary}
+                  danger
                   type="button"
                   phx-click="delete_skill"
                   phx-value-id={skill.id}
                   data-confirm="Delete this skill? Agents using it will lose its tools and instructions."
-                  class="zaq-text-caption transition-colors"
-                  style="color: var(--zaq-text-color-body-danger)"
                 >
                   Delete
-                </button>
+                </DSButton.button>
               </DSTable.table_actions>
             </DSTable.table_cell>
           </DSTable.table_row>
@@ -225,15 +226,16 @@
                 <label class="zaq-field-label-uppercase block">
                   Tools
                 </label>
-                <button
+                <DSButton.button
                   id="add-tools-button"
+                  variant={:secondary}
                   type="button"
+                  class="shrink-0"
                   phx-click="open_tools_picker"
-                  class="zaq-btn zaq-btn-secondary"
                   disabled={@tools == [] or unselected_tool_options == []}
                 >
                   + Add tools
-                </button>
+                </DSButton.button>
               </div>
               <div
                 :if={@tools == []}
@@ -254,15 +256,16 @@
                 <label class="zaq-field-label-uppercase block">
                   MCP Endpoints
                 </label>
-                <button
+                <DSButton.button
                   id="add-mcp-button"
+                  variant={:secondary}
                   type="button"
+                  class="shrink-0"
                   phx-click="open_mcp_picker"
-                  class="zaq-btn zaq-btn-secondary"
                   disabled={unselected_mcp_options == []}
                 >
                   + Add MCP
-                </button>
+                </DSButton.button>
               </div>
               <div
                 :if={@mcp_endpoints == []}
@@ -343,21 +346,15 @@
           </label>
           
 <!-- Actions -->
-          <div class="flex items-center justify-end gap-3 pt-2">
-            <button
-              type="button"
-              phx-click="cancel_form"
-              class="zaq-btn zaq-btn-secondary"
-            >
-              Cancel
-            </button>
-            <button
-              id="save-skill-button"
-              type="submit"
-              class="zaq-btn zaq-btn-secondary"
-            >
-              Save
-            </button>
+          <div class="flex w-full justify-end pt-2">
+            <div class="zaq-layout-inline">
+              <DSButton.button variant={:secondary} type="button" phx-click="cancel_form">
+                Cancel
+              </DSButton.button>
+              <DSButton.button id="save-skill-button" variant={:primary} type="submit">
+                Save
+              </DSButton.button>
+            </div>
           </div>
         </.form>
 
