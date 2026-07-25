@@ -36,6 +36,7 @@ defmodule Zaq.Engine.Workflows.DispatchBatchTriggersRunAgentTest do
 
   alias Zaq.Agent
   alias Zaq.Agent.ServerManager
+  alias Zaq.Engine.EventRegistry
   alias Zaq.Engine.Workflows
   alias Zaq.TestSupport.OpenAIStub
 
@@ -43,7 +44,6 @@ defmodule Zaq.Engine.Workflows.DispatchBatchTriggersRunAgentTest do
   @dispatch_event_module "Zaq.Agent.Tools.Workflow.DispatchEvent"
   @run_agent_module "Zaq.Agent.Tools.Workflow.RunAgent"
 
-  @event_name "lead_identified"
   @units 8
 
   # Seeds the fixed list the batch fans out over. One required-free schema keeps it
@@ -112,6 +112,11 @@ defmodule Zaq.Engine.Workflows.DispatchBatchTriggersRunAgentTest do
     stub_passthrough()
     test_pid = self()
 
+    # Unique per run so parallel/async tests broadcasting `lead_identified` on the
+    # shared PubSub topic cannot fire this case's trigger or pollute its run count.
+    event_name = "batch_trigger_#{System.unique_integer([:positive, :monotonic])}"
+    event_key = "engine:#{event_name}"
+
     # The first LLM request to land holds its response open, guaranteeing all runs
     # overlap in time. With per-run scope isolation this just makes one run slower;
     # with a shared scope it would force the rest into :busy.
@@ -169,13 +174,14 @@ defmodule Zaq.Engine.Workflows.DispatchBatchTriggersRunAgentTest do
       })
 
     # The real trigger wiring: create_trigger normalizes the name to
-    # "engine:lead_identified" and (via sync_registry) activates it in the running
+    # "engine:<event_name>" and (via sync_registry) activates it in the running
     # EventRegistry, so live broadcasts of that event fire this trigger.
-    {:ok, trigger} = Workflows.create_trigger(%{event_name: @event_name})
+    {:ok, trigger} = Workflows.create_trigger(%{event_name: event_name})
     {:ok, _} = Workflows.assign_workflow_to_trigger(trigger, workflow_b)
+    assert Map.get(EventRegistry.list_events(), event_key) == true
 
     # Workflow A: seed 8 items, fan them out via Batch, dispatch one real event each.
-    {:ok, workflow_a} = Workflows.create_workflow(workflow_a_params())
+    {:ok, workflow_a} = Workflows.create_workflow(workflow_a_params(event_name))
 
     assert {:ok, run_a} = Workflows.create_and_start_run(workflow_a, source_event())
     assert run_a.status == "completed", "producer batch should complete and dispatch 8 events"
@@ -219,7 +225,7 @@ defmodule Zaq.Engine.Workflows.DispatchBatchTriggersRunAgentTest do
   # dispatch step is the production DispatchEvent with no router override, so it
   # publishes through the real Zaq.NodeRouter. `machine: true` marks each triggered
   # B run as actorless (skip_permissions), mirroring the live producer.
-  defp workflow_a_params do
+  defp workflow_a_params(event_name) do
     %{
       name: "Batch Trigger A #{System.unique_integer()}",
       status: "active",
@@ -250,7 +256,7 @@ defmodule Zaq.Engine.Workflows.DispatchBatchTriggersRunAgentTest do
                 "name" => "dispatch_item",
                 "type" => "action",
                 "module" => @dispatch_event_module,
-                "params" => %{"event_name" => @event_name, "machine" => true}
+                "params" => %{"event_name" => event_name, "machine" => true}
               }
             ]
           },
@@ -297,7 +303,7 @@ defmodule Zaq.Engine.Workflows.DispatchBatchTriggersRunAgentTest do
     settled = Enum.filter(runs, &(&1.status in ["completed", "failed"]))
 
     cond do
-      length(settled) >= count ->
+      length(runs) == count and length(settled) == count ->
         runs
 
       System.monotonic_time(:millisecond) > deadline ->
