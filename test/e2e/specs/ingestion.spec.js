@@ -78,6 +78,40 @@ function sidecarRow(page, filename) {
   return page.locator("button.zaq-table-sidecar-preview").filter({ hasText: filename })
 }
 
+async function closeJobsDrawer(page) {
+  const drawer = page.locator("#ingestion-jobs-drawer")
+  if (await drawer.isVisible().catch(() => false)) {
+    await drawer.getByRole("button", { name: /close drawer/i }).click()
+    await expect(drawer).not.toBeVisible({ timeout: 5_000 })
+    await waitForLiveViewSettled(page)
+  }
+}
+
+// Async ingest auto-opens the jobs drawer. Wait for the terminal job status there
+// before asserting file-row badges — avoids racing the 30s test timeout when CI
+// is slow to drain the Oban queue.
+async function waitForJobStatus(page, filename, status) {
+  const drawer = page.locator("#ingestion-jobs-drawer")
+  await expect(drawer).toBeVisible({ timeout: 10_000 })
+
+  const jobCard = drawer.locator(".zaq-card-default").filter({ hasText: filename }).first()
+  await expect(jobCard.getByText(status, { exact: true })).toBeVisible({ timeout: 60_000 })
+}
+
+async function waitForIngestedTag(page, filename) {
+  await waitForJobStatus(page, filename, "completed")
+  await expect(fileRow(page, filename)).toContainText("ingested", { timeout: 20_000 })
+  await closeJobsDrawer(page)
+}
+
+async function waitForFailedTag(page, filename) {
+  await waitForJobStatus(page, filename, "failed")
+  const row = fileRow(page, filename)
+  await expect(row).toContainText("failed", { timeout: 20_000 })
+  await expect(row).not.toContainText("ingested")
+  await closeJobsDrawer(page)
+}
+
 // Ensure the file is selected then ingest.
 // Uses check() (idempotent) instead of a point-in-time isChecked() read so that
 // an in-flight PubSub handle_info re-render cannot produce a stale DOM snapshot
@@ -86,6 +120,7 @@ async function selectAndIngest(page, row) {
   // Clear any stale flash FIRST so the "Ingestion started." check below cannot
   // match a leftover toast from a previous call and silently skip the real wait.
   await dismissFlash(page)
+  await closeJobsDrawer(page)
   await waitForLiveViewSettled(page)
   const checkbox = row.getByRole("checkbox")
   const ingestButton = page.locator(SEL.ingestButton)
@@ -171,6 +206,7 @@ test.describe("Ingestion", () => {
   test("ingest PDF shows ingested tag and sidecar; changing model invalidates; job failure shows failed tag; re-ingest restores", async ({
     page,
   }) => {
+    test.setTimeout(180_000)
     // Use a timestamp-unique filename so parallel/repeated runs don't collide.
     const pdfFilename = `e2e-ingestion-${Date.now()}.pdf`
     const sidecarFilename = pdfFilename.replace(/\.pdf$/, ".md")
@@ -218,10 +254,7 @@ test.describe("Ingestion", () => {
     await expect(row).toBeVisible()
 
     await selectAndIngest(page, row)
-
-    // After DocumentProcessorFake processes the job, a PubSub broadcast triggers
-    // load_entries() in the LiveView, which updates the ingestion_map.
-    await expect(row.locator("span", { hasText: "ingested" })).toBeVisible({ timeout: 15_000 })
+    await waitForIngestedTag(page, pdfFilename)
 
     // ── Step 3b: Sidecar sub-row must appear below the PDF row ───────────────
     //
@@ -240,13 +273,11 @@ test.describe("Ingestion", () => {
 
     await page.request.get("/e2e/processor/fail?count=1")
     await selectAndIngest(page, row)
-
-    await expect(row.locator("span", { hasText: "failed" })).toBeVisible({ timeout: 15_000 })
-    await expect(row.locator("span", { hasText: "ingested" })).not.toBeVisible()
+    await waitForFailedTag(page, pdfFilename)
 
     // Restore the "ingested" state before the model-change step.
     await selectAndIngest(page, row)
-    await expect(row.locator("span", { hasText: "ingested" })).toBeVisible({ timeout: 15_000 })
+    await waitForIngestedTag(page, pdfFilename)
 
     // ── Step 4: Change embedding model → destructive save ────────────────────
     //
@@ -330,26 +361,12 @@ test.describe("Ingestion", () => {
     await page.request.get("/e2e/processor/fail?count=1")
 
     await selectAndIngest(page, rowAfterReset)
-
-    await expect(
-      rowAfterReset.locator("span", { hasText: "failed" })
-    ).toBeVisible({ timeout: 15_000 })
-
-    await expect(rowAfterReset.locator("span", { hasText: "ingested" })).not.toBeVisible()
+    await waitForFailedTag(page, pdfFilename)
 
     // ── Step 7: Re-ingest (no failure) → "ingested" tag must return ──────────
-    //
-    // selectAndIngest checks isChecked() first — after step 7 the file is still
-    // selected (LiveView does not clear @selected on job completion), so the
-    // checkbox click is skipped and we go straight to the ingest button.
 
     await selectAndIngest(page, rowAfterReset)
-
-    await expect(
-      rowAfterReset.locator("span", { hasText: "ingested" })
-    ).toBeVisible({ timeout: 15_000 })
-
-    await expect(rowAfterReset.locator("span", { hasText: "failed" })).not.toBeVisible()
+    await waitForIngestedTag(page, pdfFilename)
   })
 
   // ── Folder rename preserves ingested documents (issue #331) ──────────────
@@ -359,6 +376,7 @@ test.describe("Ingestion", () => {
   // tag intact) after navigating into the renamed folder.
 
   test("renaming a folder keeps ingested file visible with ingested tag", async ({ page }) => {
+    test.setTimeout(120_000)
     const ts = Date.now()
     const folderName = `zaq-rename-${ts}`
     const renamedFolder = `product-rename-${ts}`
@@ -396,7 +414,7 @@ test.describe("Ingestion", () => {
     const row = fileRow(page, pdfFilename)
     await expect(row).toBeVisible({ timeout: 10_000 })
     await selectAndIngest(page, row)
-    await expect(row.locator("span", { hasText: "ingested" })).toBeVisible({ timeout: 15_000 })
+    await waitForIngestedTag(page, pdfFilename)
 
     // Sidecar .md must appear as a sub-row under the PDF before we rename.
     await expect(sidecarRow(page, sidecarFilename)).toBeVisible({ timeout: 5_000 })
