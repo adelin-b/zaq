@@ -24,6 +24,12 @@ defmodule Zaq.Channels.ChatBridge do
   Supabase user id — also the Person channel identity), `:message_id` (request
   correlation id echoed back on `send_reply/2`), `:source_filter` (list of
   source prefixes retrieval is restricted to; `[]`/`nil` means unrestricted).
+
+  `:author_name` and `:author_email` carry the caller's identity. This channel
+  has no profile API for `Zaq.People.IdentityResolver` to enrich from, so they
+  are the only way a chat Person lands in the People directory under a real
+  name (rather than the opaque `author_id`) and gets matched against an
+  existing Person by email — see `Zaq.People.Resolver.normalize/2`.
   """
   @spec to_internal(map(), map()) :: Incoming.t()
   @impl true
@@ -32,12 +38,25 @@ defmodule Zaq.Channels.ChatBridge do
       content: params[:content],
       channel_id: params[:conversation_id],
       author_id: params[:author_id],
+      author_name: presence(params[:author_name]),
       message_id: params[:message_id],
       provider: :chat,
       content_filter: params[:source_filter] || [],
-      metadata: %{conversation_id: params[:conversation_id]}
+      metadata: %{
+        conversation_id: params[:conversation_id],
+        author_email: presence(params[:author_email])
+      }
     })
   end
+
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_value), do: nil
 
   @doc """
   Delivers the pipeline result to the waiting HTTP request process.

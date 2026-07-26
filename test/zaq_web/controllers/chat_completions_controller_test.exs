@@ -4,6 +4,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
 
   import Ecto.Query, only: [from: 2]
 
+  alias Zaq.Accounts.People
   alias Zaq.Engine.Conversations
 
   @path "/v1/chat/completions"
@@ -241,6 +242,67 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
 
     assert sse =~ "zaq_sources"
     assert sse =~ "data: [DONE]"
+  end
+
+  # ---------------------------------------------------------------------------
+  # People directory — the run resolves a Person from the `chat` channel
+  # identity, named and matched from the caller-supplied `zaq_user`.
+  # ---------------------------------------------------------------------------
+
+  # Each call is its own request (and its own conversation), so a multi-turn
+  # test exercises the same path a real caller's successive turns take.
+  defp ask_as(user_id, overrides) do
+    build_conn()
+    |> put_req_header("content-type", "application/json")
+    |> authed()
+    |> post(@path, body(Map.merge(%{"stream" => false, "user" => user_id}, overrides)))
+  end
+
+  test "creates one People entry per caller, named from zaq_user" do
+    with_router(EchoRouter)
+    user_id = "supabase-" <> Ecto.UUID.generate()
+
+    assert json_response(
+             ask_as(user_id, %{
+               "zaq_user" => %{"name" => "Adelin Bérard", "email" => "adelin@example.org"}
+             }),
+             200
+           )
+
+    assert {:ok, person} = People.match_by_channel("chat", user_id)
+    assert person.full_name == "Adelin Bérard"
+    assert person.email == "adelin@example.org"
+  end
+
+  test "reuses the same Person across turns instead of creating one per request" do
+    with_router(EchoRouter)
+    user_id = "supabase-" <> Ecto.UUID.generate()
+    identity = %{"zaq_user" => %{"name" => "Jeanne Martin"}}
+
+    assert json_response(ask_as(user_id, identity), 200)
+    assert {:ok, first} = People.match_by_channel("chat", user_id)
+
+    assert json_response(ask_as(user_id, identity), 200)
+    assert {:ok, second} = People.match_by_channel("chat", user_id)
+
+    assert first.id == second.id
+    assert [%{platform: "chat", channel_identifier: ^user_id}] = second.channels
+  end
+
+  test "renames a Person that was seeded from the raw user id once a name arrives" do
+    with_router(EchoRouter)
+    user_id = "supabase-" <> Ecto.UUID.generate()
+
+    # First turn without zaq_user: nothing to name the person with.
+    assert json_response(ask_as(user_id, %{}), 200)
+    assert {:ok, seeded} = People.match_by_channel("chat", user_id)
+    assert seeded.full_name == user_id
+
+    assert json_response(ask_as(user_id, %{"zaq_user" => %{"name" => "Paul Durand"}}), 200)
+
+    assert {:ok, healed} = People.match_by_channel("chat", user_id)
+    assert healed.id == seeded.id
+    assert healed.full_name == "Paul Durand"
   end
 
   test "502 when no pipeline result arrives before the timeout", %{conn: conn} do

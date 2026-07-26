@@ -236,6 +236,43 @@ defmodule Zaq.People.ResolverTest do
     end
   end
 
+  # ── chat ─────────────────────────────────────────────────────────────────
+
+  describe "normalize/2 - chat" do
+    test "maps author_name (arriving as username) to display_name and reads the email from metadata" do
+      attrs = %{
+        channel_id: "supabase-user-1",
+        username: "Adelin Bérard",
+        metadata: %{author_email: "adelin@example.org"}
+      }
+
+      result = Resolver.normalize("chat", attrs)
+
+      assert result["channel_id"] == "supabase-user-1"
+      # display_name is what seeds the Person's full_name — without it the
+      # directory entry would be named after the opaque user id.
+      assert result["display_name"] == "Adelin Bérard"
+      assert result["email"] == "adelin@example.org"
+    end
+
+    test "accepts string metadata keys" do
+      attrs = %{
+        channel_id: "supabase-user-2",
+        metadata: %{"author_email" => "b@example.org"}
+      }
+
+      assert Resolver.normalize("chat", attrs)["email"] == "b@example.org"
+    end
+
+    test "leaves display_name and email nil when the caller sends no identity" do
+      result = Resolver.normalize("chat", %{channel_id: "supabase-user-3"})
+
+      assert result["channel_id"] == "supabase-user-3"
+      assert result["display_name"] == nil
+      assert result["email"] == nil
+    end
+  end
+
   # ── fallback ─────────────────────────────────────────────────────────────
 
   describe "normalize/2 - unknown platform" do

@@ -53,6 +53,11 @@ defmodule ZaqWeb.ChatCompletionsController do
     channel identity (the `user` id). Fresh chat Persons belong to no team, so
     retrieval surfaces only `"public"`-tagged documents — the transport never
     blanket-bypasses document permissions (`skip_permissions` stays false).
+  - `zaq_user.email`, when sent, links the caller to an existing Person with
+    that email (`Zaq.Accounts.People.match_person/1` matches on email first),
+    exactly like the Slack/Teams/email channels. That is the point — one human,
+    one directory entry — but it also means the caller inherits that Person's
+    teams, so only send an email the caller is authenticated under.
   """
 
   use ZaqWeb, :controller
@@ -97,6 +102,8 @@ defmodule ZaqWeb.ChatCompletionsController do
         content: question,
         conversation_id: convo_id,
         author_id: user_id,
+        author_name: zaq_user_field(params, "name"),
+        author_email: zaq_user_field(params, "email"),
         message_id: request_id,
         source_filter: parse_source_filter(params)
       })
@@ -537,6 +544,25 @@ defmodule ZaqWeb.ChatCompletionsController do
 
       value when is_binary(value) and value != "" ->
         [value]
+
+      _ ->
+        nil
+    end
+  end
+
+  # Optional `zaq_user` (a ZAQ extension): `%{"name" => ..., "email" => ...}`
+  # for the caller identified by the standard `user` id. Chat Completions has no
+  # field for a display name or an email, and this channel exposes no profile API
+  # for ZAQ to fetch one from, so the caller supplies them here — they are what
+  # let `Zaq.People` name the Person and match it to an existing directory entry
+  # by email instead of creating one named after the raw user id.
+  defp zaq_user_field(params, key) do
+    case fetch(params, "zaq_user") do
+      %{} = zaq_user ->
+        case fetch(zaq_user, key) do
+          value when is_binary(value) -> value
+          _ -> nil
+        end
 
       _ ->
         nil
