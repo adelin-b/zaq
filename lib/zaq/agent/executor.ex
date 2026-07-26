@@ -118,6 +118,10 @@ defmodule Zaq.Agent.Executor do
       when is_binary(id) and id != "",
       do: scoped_id(:web, :conv, id)
 
+  def derive_scope(%Incoming{provider: :chat, metadata: %{conversation_id: id}}, _actor)
+      when is_binary(id) and id != "",
+      do: "chat:conv:#{id}"
+
   def derive_scope(%Incoming{provider: provider} = incoming, actor) do
     case ActorNormalizer.person_id(actor) do
       nil -> derive_scope_without_person(incoming)

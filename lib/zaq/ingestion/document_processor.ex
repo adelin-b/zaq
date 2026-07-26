@@ -592,16 +592,29 @@ defmodule Zaq.Ingestion.DocumentProcessor do
   defp folder_tags(source) do
     {volume, rel} = SourcePath.split_source(source, "default")
 
-    case Path.dirname(rel) do
-      "." ->
-        []
+    rel
+    |> Path.dirname()
+    |> ancestor_folders()
+    |> Enum.find_value([], fn folder ->
+      case FolderSetting.get(volume, folder) do
+        nil -> nil
+        setting -> setting.tags
+      end
+    end)
+  end
 
-      folder ->
-        case FolderSetting.get(volume, folder) do
-          nil -> []
-          setting -> setting.tags
-        end
-    end
+  # Nearest folder first, walking up to the volume root. `set_folder_public/2`
+  # back-fills by SOURCE PREFIX, so flagging `"PV"` also tags `PV/2026/cm.pdf`;
+  # checking only the immediate parent would leave that file untagged when it is
+  # later re-ingested, silently dropping it out of public retrieval.
+  defp ancestor_folders("."), do: []
+
+  defp ancestor_folders(folder) do
+    Stream.unfold(folder, fn
+      "." -> nil
+      "/" -> nil
+      current -> {current, Path.dirname(current)}
+    end)
   end
 
   defp document_title(opts), do: Keyword.get(opts, :document_title)
@@ -1087,9 +1100,13 @@ defmodule Zaq.Ingestion.DocumentProcessor do
         section_path: c.section_path,
         chunk_index: c.chunk_index,
         position: fragment("(? ->> 'position')::int", c.metadata),
-        # doc markdown carries `<!-- page: N -->` markers; resolve the chunk's
-        # page from its stored line position. This reads full document content
-        # per matched section; group by document if query scope grows.
+        # Canonical page/line locator written at ingest time by `put_locators/2`
+        # as "P<page>|L<line>", derived from the same `<!-- page: N -->` markers.
+        start_locator: fragment("? ->> 'start'", c.metadata),
+        # Fallback only — chunks ingested before locators existed carry no
+        # `start`, so their page is still re-derived from the document body.
+        # Costs a full document read per matched section; drop this select (and
+        # `page_for_position/2`) once every corpus has been re-ingested.
         doc_content: d.content
       })
       |> Repo.all()
@@ -1108,16 +1125,39 @@ defmodule Zaq.Ingestion.DocumentProcessor do
           "document_id" => r.document_id,
           "section_path" => r.section_path,
           "position" => r.position,
-          "page" => page_for_position(r.doc_content, r.position)
+          "page" => page_of(r)
         }
       end)
 
     {:ok, results}
   end
 
-  # Resolves a chunk's page from its line position: the page is the last
-  # `<!-- page: N -->` marker at or before that line. Falls back to 1 when the
-  # doc has no markers or the position is unknown.
+  # Prefer the locator persisted at ingest time; it is written from the same
+  # line table the chunker used to split the document, so it cannot drift from
+  # the chunk it describes.
+  defp page_of(%{start_locator: locator} = row) do
+    case page_from_locator(locator) do
+      nil -> page_for_position(row.doc_content, row.position)
+      page -> page
+    end
+  end
+
+  # "P<page>|L<line>" — see `put_page_line/4`.
+  defp page_from_locator(locator) when is_binary(locator) do
+    case Regex.run(~r/^P(\d+)\|L\d+$/, locator) do
+      [_, page] -> String.to_integer(page)
+      _ -> nil
+    end
+  end
+
+  defp page_from_locator(_locator), do: nil
+
+  # Legacy path for chunks stored before locators existed: the page is the last
+  # page marker at or before the chunk's recorded line. `position` counts RAW
+  # parse lines while the chunker counts meaningful ones, so this can land a
+  # page late on documents with lots of blank/comment lines — the locator above
+  # is authoritative wherever it exists. Marker regex is kept identical to
+  # `DocumentChunker`'s `@page_marker` so both agree on what a marker is.
   defp page_for_position(content, position)
        when is_binary(content) and is_integer(position) do
     content
@@ -1125,7 +1165,7 @@ defmodule Zaq.Ingestion.DocumentProcessor do
     |> Enum.take(position + 1)
     |> Enum.reverse()
     |> Enum.find_value(1, fn line ->
-      case Regex.run(~r/<!-- page: (\d+) -->/, line) do
+      case Regex.run(~r/^<!--\s*page:\s*(\d+)\s*-->$/, String.trim(line)) do
         [_, n] -> String.to_integer(n)
         _ -> false
       end

@@ -1163,6 +1163,65 @@ defmodule Zaq.Ingestion.DocumentProcessorTest do
       end)
     end
 
+    test "page comes from the chunk's persisted start locator" do
+      stub_embedding_success()
+
+      # The body's only marker says page 1. If the page were still re-derived
+      # from the document text this would return 1 — the locator must win.
+      doc =
+        create_document(%{
+          source: "locator-wins.md",
+          content: "<!-- page: 1 -->\nLocator payload for citation.\n"
+        })
+
+      dim = embedding_dimension()
+
+      %Chunk{}
+      |> Chunk.changeset(%{
+        document_id: doc.id,
+        content: "Locator payload for citation.",
+        chunk_index: 1,
+        section_path: ["Locator"],
+        metadata: %{section_type: :heading, section_level: 1, position: 1, start: "P7|L42"},
+        embedding: Pgvector.HalfVector.new(List.duplicate(0.1, dim))
+      })
+      |> Repo.insert!()
+
+      assert {:ok, [result]} =
+               DocumentProcessor.query_extraction("Locator payload", skip_permissions: true)
+
+      assert result["page"] == 7
+    end
+
+    test "page falls back to the document body when the chunk predates locators" do
+      stub_embedding_success()
+
+      doc =
+        create_document(%{
+          source: "legacy-no-locator.md",
+          content: "<!-- page: 4 -->\nLegacy payload for citation.\n"
+        })
+
+      dim = embedding_dimension()
+
+      %Chunk{}
+      |> Chunk.changeset(%{
+        document_id: doc.id,
+        content: "Legacy payload for citation.",
+        chunk_index: 1,
+        section_path: ["Legacy"],
+        # No :start — exactly what chunks ingested before locators look like.
+        metadata: %{section_type: :heading, section_level: 1, position: 1},
+        embedding: Pgvector.HalfVector.new(List.duplicate(0.1, dim))
+      })
+      |> Repo.insert!()
+
+      assert {:ok, [result]} =
+               DocumentProcessor.query_extraction("Legacy payload", skip_permissions: true)
+
+      assert result["page"] == 4
+    end
+
     test "uses strict context-window boundary (equal is excluded)" do
       stub_embedding_success()
       doc = create_document(%{source: "strict-boundary.md"})

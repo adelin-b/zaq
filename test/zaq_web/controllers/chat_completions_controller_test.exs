@@ -184,6 +184,48 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     end
   end
 
+  # EchoRouter's cumulative sequence is strictly monotonic, so it never exercises
+  # a ReAct segment reset. This one restarts the accumulator mid-run — the normal
+  # shape of a multi-step agentic answer.
+  defmodule SegmentResetRouter do
+    @moduledoc false
+    alias Zaq.Channels.ChatBridge
+    alias Zaq.Engine.Messages.{Incoming, Outgoing}
+
+    @final "Le conseil a voté le budget."
+
+    def dispatch(%Zaq.Event{request: %Incoming{} = incoming} = event) do
+      topic = ChatBridge.topic(incoming.channel_id)
+
+      for cumulative <- [
+            "Je vais",
+            "Je vais chercher dans les documents.",
+            # New segment: no longer extends what was sent.
+            "Le",
+            "Le conseil a voté",
+            @final
+          ] do
+        Phoenix.PubSub.broadcast(
+          Zaq.PubSub,
+          topic,
+          {:chat_stream_delta, incoming.message_id, cumulative}
+        )
+      end
+
+      outgoing = %Outgoing{
+        body: @final,
+        channel_id: incoming.channel_id,
+        provider: :chat,
+        in_reply_to: incoming.message_id,
+        metadata: incoming.metadata
+      }
+
+      Phoenix.PubSub.broadcast(Zaq.PubSub, topic, {:chat_result, incoming.message_id, outgoing})
+
+      %{event | response: nil}
+    end
+  end
+
   defmodule SilentRouter do
     @moduledoc false
     def dispatch(%Zaq.Event{} = event), do: %{event | response: nil}
@@ -262,16 +304,43 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     with_router(EchoRouter)
     user_id = "supabase-" <> Ecto.UUID.generate()
 
+    assert json_response(ask_as(user_id, %{"zaq_user" => %{"name" => "Adelin Bérard"}}), 200)
+
+    assert {:ok, person} = People.match_by_channel("chat", user_id)
+    assert person.full_name == "Adelin Bérard"
+  end
+
+  @tag :security
+  test "a caller-supplied email cannot hijack an existing Person" do
+    with_router(EchoRouter)
+
+    # A Person that exists independently of the chat channel, with teams.
+    {:ok, victim} =
+      People.create_person(%{
+        full_name: "Marie Dupont",
+        email: "marie@client.com",
+        team_ids: [1234]
+      })
+
+    user_id = "supabase-" <> Ecto.UUID.generate()
+
     assert json_response(
              ask_as(user_id, %{
-               "zaq_user" => %{"name" => "Adelin Bérard", "email" => "adelin@example.org"}
+               "zaq_user" => %{"name" => "Attacker", "email" => "marie@client.com"}
              }),
              200
            )
 
-    assert {:ok, person} = People.match_by_channel("chat", user_id)
-    assert person.full_name == "Adelin Bérard"
-    assert person.email == "adelin@example.org"
+    # The chat identity keys a NEW, team-less Person: the email is ignored, so
+    # match_by_email can never select Marie's entry.
+    assert {:ok, chat_person} = People.match_by_channel("chat", user_id)
+    refute chat_person.id == victim.id
+    assert chat_person.team_ids in [nil, []]
+
+    # Marie's directory entry is untouched — name and teams both intact.
+    reloaded = Zaq.Repo.get!(Zaq.Accounts.Person, victim.id)
+    assert reloaded.full_name == "Marie Dupont"
+    assert reloaded.team_ids == [1234]
   end
 
   test "reuses the same Person across turns instead of creating one per request" do
@@ -303,6 +372,76 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     assert {:ok, healed} = People.match_by_channel("chat", user_id)
     assert healed.id == seeded.id
     assert healed.full_name == "Paul Durand"
+  end
+
+  defp sse_content_deltas(sse) do
+    sse
+    |> String.split("\n\n", trim: true)
+    |> Enum.map(&String.trim_leading(&1, "data: "))
+    |> Enum.reject(&(&1 == "[DONE]"))
+    |> Enum.map(&Jason.decode!/1)
+    |> Enum.flat_map(fn
+      %{"choices" => [%{"delta" => %{"content" => content}} | _]} -> [content]
+      _ -> []
+    end)
+  end
+
+  test "keeps streaming after a ReAct segment restarts the accumulator", %{conn: conn} do
+    with_router(SegmentResetRouter)
+
+    sse = conn |> authed() |> post(@path, body()) |> response(200)
+    deltas = sse_content_deltas(sse)
+
+    # The second segment must arrive as MULTIPLE progressive deltas, not as one
+    # blocking chunk appended by finish_answer — that is the whole feature.
+    second_segment = deltas |> Enum.drop_while(&(not String.contains?(&1, "Le"))) |> Enum.count()
+    assert second_segment > 1
+
+    joined = Enum.join(deltas)
+    assert String.contains?(joined, "Le conseil a voté le budget.")
+    # The final answer is delivered exactly once — not duplicated by both the
+    # stream and finish_answer's reconciliation.
+    assert joined |> String.split("Le conseil a voté le budget.") |> length() == 2
+  end
+
+  test "streaming errors carry a choices frame an OpenAI client can render", %{conn: conn} do
+    with_router(SilentRouter)
+    Application.put_env(:zaq, :chat_result_timeout_ms, 50)
+    on_exit(fn -> Application.delete_env(:zaq, :chat_result_timeout_ms) end)
+
+    # stream: true — the fixture default. The status is already committed to 200
+    # by the time the timeout fires, so the error has to travel in-band.
+    sse = conn |> authed() |> post(@path, body()) |> response(200)
+
+    frames =
+      sse
+      |> String.split("\n\n", trim: true)
+      |> Enum.map(&String.trim_leading(&1, "data: "))
+      |> Enum.reject(&(&1 == "[DONE]"))
+      |> Enum.map(&Jason.decode!/1)
+
+    error_frame = Enum.find(frames, &Map.has_key?(&1, "error"))
+    assert error_frame["error"]["message"] =~ "trop de temps"
+
+    # A client that only reads `choices` must still surface the message.
+    assert [%{"delta" => %{"content" => content}, "finish_reason" => "stop"}] =
+             error_frame["choices"]
+
+    assert content =~ "trop de temps"
+    assert sse =~ "data: [DONE]"
+  end
+
+  test "citations are emitted before the terminal stop chunk", %{conn: conn} do
+    with_router(EchoRouter)
+
+    sse = conn |> authed() |> post(@path, body()) |> response(200)
+
+    sources_at = :binary.match(sse, "zaq_sources") |> elem(0)
+    stop_at = :binary.match(sse, ~s("finish_reason":"stop")) |> elem(0)
+
+    # A spec-compliant client stops consuming at finish_reason, so sources after
+    # it are silently dropped.
+    assert sources_at < stop_at
   end
 
   test "502 when no pipeline result arrives before the timeout", %{conn: conn} do

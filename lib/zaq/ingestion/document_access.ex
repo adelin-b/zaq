@@ -336,15 +336,25 @@ defmodule Zaq.Ingestion.DocumentAccess do
   `nil` or `[]` returns `true` (no filtering).
   """
   @spec build_source_filter_condition([String.t()] | nil) :: Ecto.Query.dynamic_expr()
+  # A caller-supplied filter list becomes one OR'd condition per entry, so an
+  # unbounded list is a planner-blowup DoS on every retrieval call. Cap it.
+  @max_source_filters 200
+
   def build_source_filter_condition(nil), do: dynamic([doc: _d], true)
   def build_source_filter_condition([]), do: dynamic([doc: _d], true)
 
   def build_source_filter_condition(source_filter) do
-    Enum.reduce(source_filter, dynamic([doc: _d], false), fn prefix, acc ->
+    source_filter
+    |> Enum.take(@max_source_filters)
+    |> Enum.reduce(dynamic([doc: _d], false), fn prefix, acc ->
       if String.contains?(prefix |> String.split("/") |> List.last(), ".") do
         dynamic([doc: d], ^acc or d.source == ^prefix)
       else
-        dynamic([doc: d], ^acc or like(d.source, ^"#{prefix}/%"))
+        # escape_like/1 is mandatory here: this filter is the per-commune
+        # isolation boundary, and an unescaped "%" would turn it into
+        # `LIKE '%/%'` — matching every document with a slash in its source,
+        # i.e. the exact opposite of isolating one commune.
+        dynamic([doc: d], ^acc or like(d.source, ^(escape_like(prefix) <> "/%")))
       end
     end)
   end

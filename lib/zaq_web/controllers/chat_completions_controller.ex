@@ -53,11 +53,14 @@ defmodule ZaqWeb.ChatCompletionsController do
     channel identity (the `user` id). Fresh chat Persons belong to no team, so
     retrieval surfaces only `"public"`-tagged documents — the transport never
     blanket-bypasses document permissions (`skip_permissions` stays false).
-  - `zaq_user.email`, when sent, links the caller to an existing Person with
-    that email (`Zaq.Accounts.People.match_person/1` matches on email first),
-    exactly like the Slack/Teams/email channels. That is the point — one human,
-    one directory entry — but it also means the caller inherits that Person's
-    teams, so only send an email the caller is authenticated under.
+  - The bearer token authenticates the calling *service*, never the end user, so
+    every identity field in the body (`user`, `zaq_user.name`) is an unverified
+    claim. They may therefore only ever key a Person the chat channel itself
+    owns. `zaq_user` deliberately carries NO email: `People.match_person/1`
+    matches on email first and platform-agnostically, so accepting one would let
+    any token holder select an arbitrary existing Person by guessing its
+    address, inherit its `team_ids` (widening retrieval past public documents)
+    and overwrite its `full_name`. See `Zaq.People.Resolver.normalize/2`.
   """
 
   use ZaqWeb, :controller
@@ -93,9 +96,22 @@ defmodule ZaqWeb.ChatCompletionsController do
   end
 
   defp run(conn, params, question, convo_id, user_id) do
+    topic = ChatBridge.topic(convo_id)
+    # Subscribe before routing so the reply broadcast can't win the race, and
+    # ALWAYS release it: Bandit serves successive keep-alive requests in the
+    # same process, so a leaked subscription would keep delivering another
+    # conversation's completions into this process's mailbox forever.
+    :ok = Phoenix.PubSub.subscribe(Zaq.PubSub, topic)
+
+    try do
+      do_run(conn, params, question, convo_id, user_id)
+    after
+      Phoenix.PubSub.unsubscribe(Zaq.PubSub, topic)
+    end
+  end
+
+  defp do_run(conn, params, question, convo_id, user_id) do
     request_id = Ecto.UUID.generate()
-    # Subscribe before routing so the reply broadcast can't win the race.
-    :ok = Phoenix.PubSub.subscribe(Zaq.PubSub, ChatBridge.topic(convo_id))
 
     incoming =
       ChatBridge.to_internal(%{
@@ -103,7 +119,6 @@ defmodule ZaqWeb.ChatCompletionsController do
         conversation_id: convo_id,
         author_id: user_id,
         author_name: zaq_user_field(params, "name"),
-        author_email: zaq_user_field(params, "email"),
         message_id: request_id,
         source_filter: parse_source_filter(params)
       })
@@ -119,8 +134,9 @@ defmodule ZaqWeb.ChatCompletionsController do
       # final answer only appends its remainder.
       sse_started?: false,
       role_sent?: false,
-      sent: "",
-      mismatch?: false
+      # Bytes already on the wire for the CURRENT ReAct segment; reset when a
+      # new segment restarts the accumulator (see push_stream/2).
+      sent: ""
     }
 
     # Grounding (an optional OpenAI `system` message) frames THIS run only —
@@ -178,7 +194,6 @@ defmodule ZaqWeb.ChatCompletionsController do
   # ---------------------------------------------------------------------------
 
   defp push_stream(%{stream?: false} = acc, _cumulative), do: acc
-  defp push_stream(%{mismatch?: true} = acc, _cumulative), do: acc
 
   defp push_stream(acc, cumulative) when is_binary(cumulative) do
     emittable = cumulative |> strip_source_markers() |> safe_stream_prefix() |> ltrim_if_new(acc)
@@ -196,15 +211,30 @@ defmodule ZaqWeb.ChatCompletionsController do
         |> emit_acc(&chunk(&1, %{content: delta}, nil))
         |> Map.put(:sent, emittable)
 
-      acc.sent == "" ->
-        acc
-
       true ->
-        %{acc | mismatch?: true}
+        restart_segment(acc, emittable)
     end
   end
 
   defp push_stream(acc, _cumulative), do: acc
+
+  # The cumulative text stopped extending what we sent, which means a new ReAct
+  # segment restarted the accumulator. Since the controller pins the answering
+  # executor, multi-segment runs are the NORMAL case — giving up here would stop
+  # streaming for the rest of the run and deliver the real answer as one blocking
+  # chunk. Emit a break and keep going, tracking only the new segment.
+  defp restart_segment(acc, emittable) do
+    case String.trim_leading(emittable) do
+      "" ->
+        %{acc | sent: ""}
+
+      segment ->
+        acc
+        |> ensure_sse_role()
+        |> emit_acc(&chunk(&1, %{content: "\n\n" <> segment}, nil))
+        |> Map.put(:sent, segment)
+    end
+  end
 
   defp ltrim_if_new(text, %{sent: ""}), do: String.trim_leading(text)
   defp ltrim_if_new(text, _acc), do: text
@@ -279,9 +309,11 @@ defmodule ZaqWeb.ChatCompletionsController do
   defp deliver(%{stream?: true} = acc, answer, sources) do
     acc = acc |> ensure_sse_role() |> finish_answer(answer)
 
-    conn = emit(acc.conn, chunk(acc, %{}, "stop"))
-    conn = if sources == [], do: conn, else: emit(conn, sources_frame(acc, sources))
-    sse_done(conn)
+    # Sources BEFORE the terminal stop chunk: a spec-compliant client stops
+    # consuming at `finish_reason`, so anything after it is dropped — and
+    # citations are the whole point of the zaq_sources extension.
+    conn = if sources == [], do: acc.conn, else: emit(acc.conn, sources_frame(acc, sources))
+    conn |> emit(chunk(acc, %{}, "stop")) |> sse_done()
   end
 
   defp deliver(%{stream?: false} = acc, answer, sources) do
@@ -475,13 +507,21 @@ defmodule ZaqWeb.ChatCompletionsController do
     }
   end
 
+  # The SSE headers are already on the wire by the time most errors surface, so
+  # the status is committed at 200 and the error has to travel in-band. A frame
+  # carrying ONLY `error` is skipped by any client that pattern-matches on
+  # `choices` — the user gets an empty bubble and nothing is surfaced anywhere.
+  # Carry the message as content too, so a stock OpenAI client renders it.
   defp stream_error(acc, reason) do
+    message = error_message(reason)
+
     %{
       id: acc.id,
       object: "chat.completion.chunk",
       created: acc.created,
       model: acc.model,
-      error: %{message: error_message(reason), type: "server_error"}
+      choices: [%{index: 0, delta: %{content: message}, finish_reason: "stop"}],
+      error: %{message: message, type: "server_error"}
     }
   end
 
@@ -550,12 +590,12 @@ defmodule ZaqWeb.ChatCompletionsController do
     end
   end
 
-  # Optional `zaq_user` (a ZAQ extension): `%{"name" => ..., "email" => ...}`
-  # for the caller identified by the standard `user` id. Chat Completions has no
-  # field for a display name or an email, and this channel exposes no profile API
-  # for ZAQ to fetch one from, so the caller supplies them here — they are what
-  # let `Zaq.People` name the Person and match it to an existing directory entry
-  # by email instead of creating one named after the raw user id.
+  # Optional `zaq_user` (a ZAQ extension): `%{"name" => ...}` for the caller
+  # identified by the standard `user` id. Chat Completions has no field for a
+  # display name and this channel exposes no profile API for ZAQ to fetch one
+  # from, so the caller supplies it here — it is what lets `Zaq.People` name the
+  # Person instead of filing it under the raw user id. Any other key (notably
+  # `email`) is ignored on purpose; see the Security section of the moduledoc.
   defp zaq_user_field(params, key) do
     case fetch(params, "zaq_user") do
       %{} = zaq_user ->

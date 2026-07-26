@@ -28,6 +28,10 @@ defmodule Zaq.Ingestion.Api do
     %{event | response: Ingestion.ingest_chat_document(attrs)}
   end
 
+  def handle_event(%Event{request: %{} = attrs} = event, :delete_chat_document, _context) do
+    %{event | response: Ingestion.delete_chat_document(attrs)}
+  end
+
   def handle_event(%Event{} = event, action, _context),
     do: InternalBoundaries.default_handle_event(event, action)
 end

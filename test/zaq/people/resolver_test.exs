@@ -239,37 +239,43 @@ defmodule Zaq.People.ResolverTest do
   # ── chat ─────────────────────────────────────────────────────────────────
 
   describe "normalize/2 - chat" do
-    test "maps author_name (arriving as username) to display_name and reads the email from metadata" do
-      attrs = %{
-        channel_id: "supabase-user-1",
-        username: "Adelin Bérard",
-        metadata: %{author_email: "adelin@example.org"}
-      }
+    test "maps author_name (arriving as username) to display_name" do
+      attrs = %{channel_id: "supabase-user-1", username: "Adelin Bérard"}
 
       result = Resolver.normalize("chat", attrs)
 
       assert result["channel_id"] == "supabase-user-1"
       # display_name is what seeds the Person's full_name — without it the
-      # directory entry would be named after the opaque user id.
+      # directory entry would be named after the opaque user id. The generic
+      # fallback clause would leave it nil, so this pins the chat clause.
       assert result["display_name"] == "Adelin Bérard"
-      assert result["email"] == "adelin@example.org"
     end
 
-    test "accepts string metadata keys" do
+    test "an explicit display_name wins over the author_name" do
+      attrs = %{channel_id: "u", username: "raw", display_name: "Real Name"}
+
+      assert Resolver.normalize("chat", attrs)["display_name"] == "Real Name"
+    end
+
+    @tag :security
+    test "never emits an email, whatever the caller sends" do
+      # The bearer token authenticates the calling service, not the end user, so
+      # an email here is an unverified claim. People.match_person/1 matches on
+      # email FIRST and platform-agnostically, so emitting one would let any
+      # token holder select an arbitrary existing Person — inheriting its
+      # team_ids and overwriting its full_name.
       attrs = %{
         channel_id: "supabase-user-2",
-        metadata: %{"author_email" => "b@example.org"}
+        username: "Attacker",
+        email: "cfo@client.com",
+        metadata: %{"author_email" => "cfo@client.com", author_email: "cfo@client.com"}
       }
 
-      assert Resolver.normalize("chat", attrs)["email"] == "b@example.org"
-    end
+      result = Resolver.normalize("chat", attrs)
 
-    test "leaves display_name and email nil when the caller sends no identity" do
-      result = Resolver.normalize("chat", %{channel_id: "supabase-user-3"})
-
-      assert result["channel_id"] == "supabase-user-3"
-      assert result["display_name"] == nil
-      assert result["email"] == nil
+      refute Map.has_key?(result, "email")
+      assert result["display_name"] == "Attacker"
+      assert result["channel_id"] == "supabase-user-2"
     end
   end
 

@@ -34,6 +34,15 @@ defmodule Zaq.Ingestion.FileExplorerTest do
     test "rejects sneaky traversal" do
       assert {:error, :path_traversal} = FileExplorer.resolve_path("foo/../../..")
     end
+
+    test "rejects a sibling directory that shares the root's name prefix" do
+      # A plain String.starts_with?/2 containment check passes this: root
+      # ".../file_explorer" would admit ".../file_explorer_backup/x". Only a
+      # path-component comparison rejects it. This matters because
+      # POST /chat/documents WRITES through this resolver.
+      assert {:error, :path_traversal} =
+               FileExplorer.resolve_path("../file_explorer_backup/x.pdf")
+    end
   end
 
   describe "resolve_path/1 with volumes configured" do
@@ -60,6 +69,18 @@ defmodule Zaq.Ingestion.FileExplorerTest do
     test "falls back to base_path when first segment is not a known volume" do
       assert {:ok, path} = FileExplorer.resolve_path("unknown/file.txt")
       assert String.ends_with?(path, "file_explorer/unknown/file.txt")
+    end
+
+    test "resolve_path/2 rejects a sibling volume sharing the root's name prefix" do
+      # Volume root ".../vol_resolve1"; ".../vol_resolve1_backup" is NOT inside
+      # it, but a string-prefix containment check would say it is.
+      assert {:error, :path_traversal} =
+               FileExplorer.resolve_path("docs", "../vol_resolve1_backup/x.pdf")
+    end
+
+    test "resolve_path/2 still admits the volume root itself and its descendants" do
+      assert {:ok, _} = FileExplorer.resolve_path("docs", ".")
+      assert {:ok, _} = FileExplorer.resolve_path("docs", "sub/deep/file.md")
     end
 
     test "rejects traversal through volume prefix" do

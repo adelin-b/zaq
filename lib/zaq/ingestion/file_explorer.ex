@@ -82,9 +82,16 @@ defmodule Zaq.Ingestion.FileExplorer do
 
   defp resolve_path_against_base(relative_path) do
     base = Path.expand(base_path())
-    full = Path.expand(Path.join(base, relative_path))
+    contain(Path.expand(Path.join(base, relative_path)), base)
+  end
 
-    if String.starts_with?(full, base) do
+  # A bare `String.starts_with?/2` compares strings, not path components, so a
+  # sibling directory sharing the root's name prefix passes it: root
+  # `/srv/zaq/data` would admit `/srv/zaq/data_backup/x` (reachable as
+  # `../data_backup/x`). Require an exact match or a `/`-delimited descendant so
+  # containment is a path relation, not a substring one.
+  defp contain(full, root) do
+    if full == root or String.starts_with?(full, root <> "/") do
       {:ok, full}
     else
       {:error, :path_traversal}
@@ -100,13 +107,7 @@ defmodule Zaq.Ingestion.FileExplorer do
 
     case Map.fetch(volumes, volume_name) do
       {:ok, vol_root} ->
-        full = Path.expand(Path.join(vol_root, relative_path))
-
-        if String.starts_with?(full, vol_root) do
-          {:ok, full}
-        else
-          {:error, :path_traversal}
-        end
+        contain(Path.expand(Path.join(vol_root, relative_path)), vol_root)
 
       :error ->
         {:error, :unknown_volume}

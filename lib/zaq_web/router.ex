@@ -153,6 +153,7 @@ defmodule ZaqWeb.Router do
 
     get "/documents", ChatDocumentsController, :index
     post "/documents", ChatDocumentsController, :create
+    delete "/documents", ChatDocumentsController, :delete
     get "/documents/:id", ChatDocumentsController, :show
     get "/documents/:id/file", ChatDocumentsController, :file
   end

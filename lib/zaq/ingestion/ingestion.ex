@@ -792,6 +792,32 @@ defmodule Zaq.Ingestion do
     end
   end
 
+  @doc """
+  Removes a chat-pushed document: the file on disk, plus its `Document` row and
+  cascaded chunks if it was already ingested.
+
+  Idempotent — an absent file and an absent row are both success, so a caller
+  cleaning up a partial push never has to know how far the push got.
+  """
+  def delete_chat_document(%{path: rel_path} = attrs) when is_binary(rel_path) do
+    volume = Map.get(attrs, :volume) || "default"
+    rel_path = SourcePath.normalize_relative(rel_path)
+
+    with {:ok, abs_path} <- FileExplorer.resolve_path(volume, rel_path) do
+      source = SourcePath.build_source(volume, rel_path)
+      _ = File.rm(abs_path)
+
+      case Document.get_by_source(source) do
+        nil -> :ok
+        document -> Document.delete(document)
+      end
+
+      {:ok, %{source: source}}
+    end
+  end
+
+  def delete_chat_document(_attrs), do: {:error, :invalid_request}
+
   defp maybe_ingest(attrs, rel_path, volume) do
     if Map.get(attrs, :ingest, true) do
       ingest_file(rel_path, :async, volume)

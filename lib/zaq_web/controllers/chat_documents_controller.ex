@@ -53,6 +53,37 @@ defmodule ZaqWeb.ChatDocumentsController do
   def create(conn, _params),
     do: json_error(conn, 400, "path and content_base64 are required")
 
+  @doc """
+  Removes a pushed document (file + Document row + chunks) from a volume.
+
+  Exists so a caller that writes several related files can undo a partial
+  sequence — e.g. a council PV push that lands the `.md` sidecar and then fails
+  on the `.pdf` would otherwise strand a private, un-ingested orphan with no
+  prune path. Idempotent: deleting an absent path is a 204, not a 404.
+  """
+  def delete(conn, %{"path" => path} = params) when is_binary(path) do
+    case dispatch_delete(path, params) do
+      {:ok, _result} -> send_resp(conn, 204, "")
+      {:error, :path_traversal} -> json_error(conn, 400, "invalid path")
+      {:error, :unknown_volume} -> json_error(conn, 400, "unknown volume")
+      {:error, reason} -> json_error(conn, 502, "delete failed: #{inspect(reason)}")
+    end
+  end
+
+  def delete(conn, _params), do: json_error(conn, 400, "path is required")
+
+  defp dispatch_delete(path, params) do
+    %{path: path, volume: params["volume"]}
+    |> Zaq.Event.new(:ingestion, opts: [action: :delete_chat_document])
+    |> Zaq.NodeRouter.dispatch()
+    |> Map.fetch!(:response)
+    |> case do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:invalid_delete_response, other}}
+    end
+  end
+
   defp decode_content(encoded) do
     case Base.decode64(encoded) do
       {:ok, content} when byte_size(content) > @max_upload_bytes -> {:error, :too_large}
@@ -66,7 +97,10 @@ defmodule ZaqWeb.ChatDocumentsController do
       path: path,
       content: content,
       public: params["public"] == true,
-      ingest: params["ingest"] != false,
+      # Urlencoded bodies stringify everything, so a bare `!= false` would read
+      # "false" as true and ingest against the caller's explicit opt-out. Coerce
+      # in the safe direction, like `public` above.
+      ingest: params["ingest"] not in [false, "false"],
       volume: params["volume"]
     }
 
