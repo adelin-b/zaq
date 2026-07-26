@@ -47,6 +47,9 @@ defmodule ZaqWeb.Endpoint do
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
+    # POST /chat/documents carries base64 file payloads (25MB raw ≈ 34MB
+    # encoded); the controller enforces its own tighter size cap.
+    length: 40_000_000,
     json_decoder: Phoenix.json_library()
 
   plug Plug.MethodOverride

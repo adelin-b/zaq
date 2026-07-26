@@ -760,6 +760,56 @@ defmodule Zaq.Ingestion do
     |> Repo.update()
   end
 
+  # --- Chat channel document push ---
+
+  @doc """
+  Writes an uploaded chat-channel document into a volume and ingests it.
+
+  Used by `POST /chat/documents` (via the ingestion role boundary) so a trusted
+  backend can push documents — e.g. a council PV PDF and its augmented `.md`
+  sidecar — instead of a human uploading them through the BO.
+
+  Attrs: `:path` (relative to the volume, e.g. `"PV CM X - 63450/pv.pdf"`),
+  `:content` (raw binary), `:public` (folder-level flag, default false),
+  `:volume` (defaults to `"default"`, the synthesized single-volume name),
+  `:ingest` (default true — pass false to only write the file, e.g. a `.md`
+  companion that the source document's ingestion picks up as its sidecar and
+  must not become a standalone public document).
+
+  Returns `{:ok, %{source: source, jobs: jobs}}` or `{:error, reason}`.
+  """
+  def ingest_chat_document(%{path: rel_path, content: content} = attrs)
+      when is_binary(rel_path) and is_binary(content) do
+    volume = Map.get(attrs, :volume) || "default"
+    rel_path = SourcePath.normalize_relative(rel_path)
+
+    with {:ok, abs_path} <- FileExplorer.resolve_path(volume, rel_path),
+         :ok <- File.mkdir_p(Path.dirname(abs_path)),
+         :ok <- File.write(abs_path, content),
+         :ok <- maybe_set_folder_public(attrs, volume, rel_path),
+         {:ok, jobs} <- maybe_ingest(attrs, rel_path, volume) do
+      {:ok, %{source: SourcePath.build_source(volume, rel_path), jobs: length(List.wrap(jobs))}}
+    end
+  end
+
+  defp maybe_ingest(attrs, rel_path, volume) do
+    if Map.get(attrs, :ingest, true) do
+      ingest_file(rel_path, :async, volume)
+    else
+      {:ok, []}
+    end
+  end
+
+  defp maybe_set_folder_public(%{public: true}, volume, rel_path) do
+    case Path.dirname(rel_path) do
+      "." -> :ok
+      # set_folder_public/2 returns :ok or raises — there is no error tuple to unwrap.
+      folder -> set_folder_public(volume, folder)
+    end
+  end
+
+  defp maybe_set_folder_public(_attrs, _volume, _rel_path), do: :ok
+
   # --- Folder public flag ---
 
   @doc """

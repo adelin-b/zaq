@@ -95,6 +95,41 @@ defmodule ZaqWeb.ChatDocumentsControllerTest do
     assert conn |> get("/chat/documents/#{document.id}/file") |> json_response(404)
   end
 
+  test "create writes the file, marks the folder public and enqueues ingestion",
+       %{conn: conn, root: root} do
+    body = %{
+      "path" => "PV CM Test - 00000/pv-2026-01-15.pdf",
+      "content_base64" => Base.encode64("%PDF-pushed"),
+      "public" => true,
+      "volume" => "documents"
+    }
+
+    resp = conn |> post("/chat/documents", body) |> json_response(202)
+    assert resp["source"] == "documents/PV CM Test - 00000/pv-2026-01-15.pdf"
+
+    assert File.read!(Path.join(root, "PV CM Test - 00000/pv-2026-01-15.pdf")) == "%PDF-pushed"
+
+    assert %{tags: ["public"]} =
+             Zaq.Repo.get_by(Zaq.Ingestion.FolderSetting,
+               volume_name: "documents",
+               folder_path: "PV CM Test - 00000"
+             )
+  end
+
+  test "create rejects traversal, bad base64 and missing fields", %{conn: conn} do
+    base = %{"content_base64" => Base.encode64("x"), "volume" => "documents"}
+
+    assert conn
+           |> post("/chat/documents", Map.put(base, "path", "../escape.pdf"))
+           |> json_response(400)
+
+    assert conn
+           |> post("/chat/documents", %{"path" => "a.pdf", "content_base64" => "%%%"})
+           |> json_response(400)
+
+    assert conn |> post("/chat/documents", %{}) |> json_response(400)
+  end
+
   defp restore_env(name, nil), do: System.delete_env(name)
   defp restore_env(name, value), do: System.put_env(name, value)
 end

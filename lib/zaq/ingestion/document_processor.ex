@@ -21,7 +21,7 @@ defmodule Zaq.Ingestion.DocumentProcessor do
   alias Zaq.Agent.TokenEstimator
   alias Zaq.Embedding.Client, as: EmbeddingClient
   alias Zaq.Ingestion.{Chunk, Document, DocumentAccess, DocumentChunker, FTSBackend}
-  alias Zaq.Ingestion.{LanguageDetector, Sidecar, SourcePath}
+  alias Zaq.Ingestion.{FolderSetting, LanguageDetector, Sidecar, SourcePath}
   alias Zaq.Ingestion.Python.Pipeline
   alias Zaq.Ingestion.Python.Steps.{DocxToMd, ImageToText, PptxToMd, XlsxToMd}
   alias Zaq.Repo
@@ -564,10 +564,16 @@ defmodule Zaq.Ingestion.DocumentProcessor do
 
   @doc """
   Upserts a `Zaq.Ingestion.Document` record.
+
+  New documents inherit their folder's tags (e.g. `"public"` from
+  `Zaq.Ingestion.set_folder_public/2`) — this is the ingest-time half of the
+  folder-tag policy documented on `Zaq.Ingestion.FolderSetting`. Existing
+  documents keep their tags (`Document.upsert/1` never replaces `:tags`), and
+  sidecar documents never inherit them (they stay non-public).
   """
   def store_document(content, source, metadata \\ %{}, title \\ nil) do
     attrs =
-      %{content: content, source: source, metadata: metadata}
+      %{content: content, source: source, metadata: metadata, tags: folder_tags(source)}
       |> maybe_put_title(title)
 
     case Document.upsert(attrs) do
@@ -578,6 +584,23 @@ defmodule Zaq.Ingestion.DocumentProcessor do
       {:error, changeset} ->
         Logger.error("Failed to store document: #{inspect(changeset)}")
         {:error, changeset}
+    end
+  end
+
+  defp folder_tags(source) when not is_binary(source), do: []
+
+  defp folder_tags(source) do
+    {volume, rel} = SourcePath.split_source(source, "default")
+
+    case Path.dirname(rel) do
+      "." ->
+        []
+
+      folder ->
+        case FolderSetting.get(volume, folder) do
+          nil -> []
+          setting -> setting.tags
+        end
     end
   end
 

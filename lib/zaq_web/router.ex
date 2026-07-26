@@ -152,6 +152,7 @@ defmodule ZaqWeb.Router do
     pipe_through :chat_bearer_auth
 
     get "/documents", ChatDocumentsController, :index
+    post "/documents", ChatDocumentsController, :create
     get "/documents/:id", ChatDocumentsController, :show
     get "/documents/:id/file", ChatDocumentsController, :file
   end

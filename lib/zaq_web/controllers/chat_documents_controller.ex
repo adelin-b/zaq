@@ -23,6 +23,64 @@ defmodule ZaqWeb.ChatDocumentsController do
     end
   end
 
+  @max_upload_bytes 25 * 1024 * 1024
+
+  @doc """
+  Pushes a document into ZAQ ingestion from a trusted backend (bearer-authed).
+
+  Body: `path` (relative to the volume, e.g. `"PV CM X - 63450/pv.pdf"`),
+  `content_base64` (file bytes), `public` (bool, folder-level flag),
+  `volume` (optional, defaults to the single-volume `"default"`).
+
+  Dispatched to the ingestion role through NodeRouter like every other
+  cross-role call; ingestion is async — 202 means the file landed and jobs
+  were enqueued.
+  """
+  def create(conn, %{"path" => path, "content_base64" => encoded} = params)
+      when is_binary(path) and is_binary(encoded) do
+    with {:ok, content} <- decode_content(encoded),
+         {:ok, result} <- dispatch_ingest(path, content, params) do
+      conn |> put_status(202) |> json(%{source: result.source, jobs: result.jobs})
+    else
+      {:error, :invalid_base64} -> json_error(conn, 400, "content_base64 is not valid base64")
+      {:error, :too_large} -> json_error(conn, 413, "file exceeds #{@max_upload_bytes} bytes")
+      {:error, :path_traversal} -> json_error(conn, 400, "invalid path")
+      {:error, :unknown_volume} -> json_error(conn, 400, "unknown volume")
+      {:error, reason} -> json_error(conn, 502, "ingestion failed: #{inspect(reason)}")
+    end
+  end
+
+  def create(conn, _params),
+    do: json_error(conn, 400, "path and content_base64 are required")
+
+  defp decode_content(encoded) do
+    case Base.decode64(encoded) do
+      {:ok, content} when byte_size(content) > @max_upload_bytes -> {:error, :too_large}
+      {:ok, content} -> {:ok, content}
+      :error -> {:error, :invalid_base64}
+    end
+  end
+
+  defp dispatch_ingest(path, content, params) do
+    attrs = %{
+      path: path,
+      content: content,
+      public: params["public"] == true,
+      ingest: params["ingest"] != false,
+      volume: params["volume"]
+    }
+
+    attrs
+    |> Zaq.Event.new(:ingestion, opts: [action: :ingest_chat_document])
+    |> Zaq.NodeRouter.dispatch()
+    |> Map.fetch!(:response)
+    |> case do
+      {:ok, result} -> {:ok, result}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:invalid_ingest_response, other}}
+    end
+  end
+
   def file(conn, %{"id" => id}) do
     with document when not is_nil(document) <- Ingestion.get_public_chat_document(id),
          {:ok, path} <- FileExplorer.resolve_path(document.source),
