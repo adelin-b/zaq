@@ -87,28 +87,37 @@ async function closeJobsDrawer(page) {
   }
 }
 
-// Async ingest auto-opens the jobs drawer. Wait for the terminal job status there
-// before asserting file-row badges — avoids racing the 30s test timeout when CI
-// is slow to drain the Oban queue.
-async function waitForJobStatus(page, filename, status) {
-  const drawer = page.locator("#ingestion-jobs-drawer")
-  await expect(drawer).toBeVisible({ timeout: 10_000 })
-
-  const jobCard = drawer.locator(".zaq-card-default").filter({ hasText: filename }).first()
-  await expect(jobCard.getByText(status, { exact: true })).toBeVisible({ timeout: 60_000 })
+async function ensureAsyncMode(page) {
+  await page.locator("#ingest-mode-async").click()
+  await waitForLiveViewSettled(page)
+  await expect(page.locator("#ingest-mode-async")).toHaveClass(/zaq-btn-tertiary--active/)
 }
 
-async function waitForIngestedTag(page, filename) {
-  await waitForJobStatus(page, filename, "completed")
-  await expect(fileRow(page, filename)).toContainText("ingested", { timeout: 20_000 })
-  await closeJobsDrawer(page)
+async function expectAsyncIngestionStarted(page) {
+  await expect(page.getByText("Ingestion started.")).toBeVisible()
+  await expect(page.locator("#monitor-jobs-button")).toContainText(/active\)/, { timeout: 15_000 })
 }
 
-async function waitForFailedTag(page, filename) {
-  await waitForJobStatus(page, filename, "failed")
+// Async completion: PubSub refreshes the file row when the job finishes.
+async function waitForAsyncRowBadge(page, filename, badge) {
   const row = fileRow(page, filename)
-  await expect(row).toContainText("failed", { timeout: 20_000 })
-  await expect(row).not.toContainText("ingested")
+  if (badge === "failed") {
+    await expect(row).toContainText("failed", { timeout: 90_000 })
+    await expect(row).not.toContainText("ingested")
+  } else {
+    await expect(row).toContainText("ingested", { timeout: 90_000 })
+  }
+}
+
+// Jobs drawer: open explicitly — do not rely on auto-open for synchronization.
+async function assertJobInDrawer(page, filename, status) {
+  await page.locator("#monitor-jobs-button").click()
+  await expect(page.locator("#ingestion-jobs-drawer")).toBeVisible({ timeout: 10_000 })
+
+  const jobCard = page.locator("#ingestion-jobs-drawer .zaq-card-default")
+    .filter({ hasText: filename })
+    .first()
+  await expect(jobCard.getByText(status, { exact: true })).toBeVisible({ timeout: 15_000 })
   await closeJobsDrawer(page)
 }
 
@@ -134,7 +143,7 @@ async function selectAndIngest(page, row) {
   // click can race ahead of toggle_select and enqueue nothing.
   await expect(ingestButton).toBeEnabled()
   await ingestButton.click()
-  await expect(page.getByText("Ingestion started.")).toBeVisible()
+  await expectAsyncIngestionStarted(page)
   // Dismiss the "Ingestion started." toast so a later call does not match on it.
   await dismissFlash(page)
 }
@@ -219,6 +228,7 @@ test.describe("Ingestion", () => {
 
     await gotoBackOfficeLive(page, INGESTION_PATH)
     await waitForLiveViewSettled(page)
+    await ensureAsyncMode(page)
 
     await expect(
       page.locator(SEL.warningHeading, { hasText: "Embedding not configured" })
@@ -254,7 +264,8 @@ test.describe("Ingestion", () => {
     await expect(row).toBeVisible()
 
     await selectAndIngest(page, row)
-    await waitForIngestedTag(page, pdfFilename)
+    await waitForAsyncRowBadge(page, pdfFilename, "ingested")
+    await assertJobInDrawer(page, pdfFilename, "completed")
 
     // ── Step 3b: Sidecar sub-row must appear below the PDF row ───────────────
     //
@@ -273,11 +284,12 @@ test.describe("Ingestion", () => {
 
     await page.request.get("/e2e/processor/fail?count=1")
     await selectAndIngest(page, row)
-    await waitForFailedTag(page, pdfFilename)
+    await waitForAsyncRowBadge(page, pdfFilename, "failed")
+    await assertJobInDrawer(page, pdfFilename, "failed")
 
     // Restore the "ingested" state before the model-change step.
     await selectAndIngest(page, row)
-    await waitForIngestedTag(page, pdfFilename)
+    await waitForAsyncRowBadge(page, pdfFilename, "ingested")
 
     // ── Step 4: Change embedding model → destructive save ────────────────────
     //
@@ -344,6 +356,8 @@ test.describe("Ingestion", () => {
     // ── Step 5: Ingestion page — "ingested" tag must be gone ─────────────────
 
     await gotoBackOfficeLive(page, INGESTION_PATH)
+    await waitForLiveViewSettled(page)
+    await ensureAsyncMode(page)
 
     const rowAfterReset = fileRow(page, pdfFilename)
     await expect(rowAfterReset).toBeVisible()
@@ -361,12 +375,12 @@ test.describe("Ingestion", () => {
     await page.request.get("/e2e/processor/fail?count=1")
 
     await selectAndIngest(page, rowAfterReset)
-    await waitForFailedTag(page, pdfFilename)
+    await waitForAsyncRowBadge(page, pdfFilename, "failed")
 
     // ── Step 7: Re-ingest (no failure) → "ingested" tag must return ──────────
 
     await selectAndIngest(page, rowAfterReset)
-    await waitForIngestedTag(page, pdfFilename)
+    await waitForAsyncRowBadge(page, pdfFilename, "ingested")
   })
 
   // ── Folder rename preserves ingested documents (issue #331) ──────────────
@@ -385,6 +399,7 @@ test.describe("Ingestion", () => {
 
     await gotoBackOfficeLive(page, INGESTION_PATH)
     await waitForLiveViewSettled(page)
+    await ensureAsyncMode(page)
 
     // ── Create folder via UI ───────────────────────────────────────────────
     await page.locator("#new-folder-button").click()
@@ -414,7 +429,8 @@ test.describe("Ingestion", () => {
     const row = fileRow(page, pdfFilename)
     await expect(row).toBeVisible({ timeout: 10_000 })
     await selectAndIngest(page, row)
-    await waitForIngestedTag(page, pdfFilename)
+    await waitForAsyncRowBadge(page, pdfFilename, "ingested")
+    await assertJobInDrawer(page, pdfFilename, "completed")
 
     // Sidecar .md must appear as a sub-row under the PDF before we rename.
     await expect(sidecarRow(page, sidecarFilename)).toBeVisible({ timeout: 5_000 })
