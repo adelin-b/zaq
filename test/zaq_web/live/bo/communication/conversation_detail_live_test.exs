@@ -75,7 +75,7 @@ defmodule ZaqWeb.Live.BO.Communication.ConversationDetailLiveTest do
     test "shows back link", %{conn: conn, user: user} do
       {conv, _} = create_conv_with_messages(user.id)
       {:ok, _view, html} = live(conn, ~p"/bo/conversations/#{conv.id}")
-      assert html =~ "History"
+      assert html =~ "Back"
     end
 
     test "date separator is rendered for messages from today", %{conn: conn, user: user} do
@@ -238,7 +238,7 @@ defmodule ZaqWeb.Live.BO.Communication.ConversationDetailLiveTest do
 
       render_hook(view, "noop", %{})
 
-      assert has_element?(view, "a", "History")
+      assert has_element?(view, "a", "Back")
     end
   end
 

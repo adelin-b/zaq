@@ -6,46 +6,26 @@
   features_version={@features_version}
 >
   <%!-- Header bar --%>
-  <div class="flex items-start justify-between mb-5">
-    <div>
-      <.link
-        navigate={~p"/bo/history"}
-        class="font-mono text-[0.75rem] text-black/40 hover:text-[#03b6d4] transition-colors"
-      >
-        ← History
-      </.link>
-      <div class="flex items-center gap-2 mt-2">
-        <span class="font-mono text-[0.7rem] px-2 py-0.5 rounded bg-black/5 text-black/50">
-          {String.capitalize(@conversation.channel_type)}
-        </span>
-        <span
-          :if={@conversation.status == "active"}
-          class="font-mono text-[0.7rem] px-2 py-0.5 rounded bg-emerald-100 text-emerald-700"
-        >
-          active
-        </span>
-        <span
-          :if={@conversation.status == "archived"}
-          class="font-mono text-[0.7rem] px-2 py-0.5 rounded bg-black/5 text-black/40"
-        >
-          archived
-        </span>
-      </div>
+  <div class="flex items-center justify-between mb-5">
+    <div class="flex items-center gap-2">
+      <DSButton.button variant={:ghost} navigate={~p"/bo/history"}>
+        ← Back
+      </DSButton.button>
+      <.table_badge status="processing">
+        {@conversation.channel_type}
+      </.table_badge>
+      <.table_badge status={@conversation.status}>
+        {@conversation.status}
+      </.table_badge>
     </div>
-    <button
-      phx-click="open_share_dialog"
-      class="font-mono text-sm font-bold px-4 py-2 rounded-lg bg-[#03b6d4] text-white hover:bg-[#03b6d4]/90 transition-colors"
-    >
+    <DSButton.button variant={:secondary} phx-click="open_share_dialog">
       Share
-    </button>
+    </DSButton.button>
   </div>
 
   <%!-- Chat thread --%>
   <div class="flex gap-6 items-start">
-    <div
-      class="-mx-8 flex-1 rounded-xl overflow-hidden"
-      style="background-color: #f7f6f3;"
-    >
+    <div class="-mx-8 flex-1 rounded-xl overflow-hidden">
       <div class="max-w-3xl mx-auto px-6 py-6 space-y-5">
         <%= for item <- inject_date_separators(@messages, :inserted_at) do %>
           <%= if Map.get(item, :type) == :date_separator do %>

@@ -27,6 +27,22 @@ defmodule ZaqWeb.SelectTest do
       )
 
     assert html =~ "Role"
+    assert html =~ "zaq-field-row-block"
+  end
+
+  test "renders inline label when label_position is inline" do
+    html =
+      render_component(&Select.select/1,
+        name: "role",
+        label: "Role",
+        label_position: "inline",
+        options: [{"Admin", "admin"}],
+        value: nil
+      )
+
+    assert html =~ "Role"
+    assert html =~ "zaq-field-row-inline"
+    refute html =~ ~s(<div class="zaq-field-row-block">)
   end
 
   test "renders no label element when omitted" do

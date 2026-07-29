@@ -57,78 +57,50 @@ defmodule ZaqWeb.History.ConversationFilters do
         phx-change="filter"
         class="zaq-ingestion-chrome-actions zaq-ingestion-chrome-actions--end flex flex-wrap items-center gap-3"
       >
-        <div :if={@is_admin && @filter_scope == "all"} class="flex items-center gap-1.5">
-          <label class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider whitespace-nowrap">
-            Team
-          </label>
-          <div class="w-40">
-            <.searchable_select
-              id="filter-team"
-              name="team_id"
-              value={@filter_team_id}
-              placeholder="Search team..."
-              empty_label="All teams"
-              compact={true}
-              options={[{"All teams", "all"} | Enum.map(@teams, &{&1.name, &1.id})]}
-            />
-          </div>
-        </div>
+        <.searchable_select
+          :if={@is_admin && @filter_scope == "all"}
+          id="filter-team"
+          name="team_id"
+          label="Team"
+          value={@filter_team_id}
+          placeholder="Search team..."
+          empty_label="All teams"
+          compact={true}
+          options={[{"All teams", "all"} | Enum.map(@teams, &{&1.name, &1.id})]}
+        />
 
-        <div :if={@is_admin && @filter_scope == "all"} class="flex items-center gap-1.5">
-          <label class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider whitespace-nowrap">
-            Person
-          </label>
-          <div class="w-44">
-            <.searchable_select
-              id="filter-person"
-              name="person_id"
-              value={@filter_person_id}
-              placeholder="Search person..."
-              empty_label="All people"
-              compact={true}
-              on_search="search_people"
-              options={[{"All people", "all"} | Enum.map(@people, &{&1.full_name, &1.id})]}
-            />
-          </div>
-        </div>
+        <.searchable_select
+          :if={@is_admin && @filter_scope == "all"}
+          id="filter-person"
+          name="person_id"
+          label="Person"
+          value={@filter_person_id}
+          placeholder="Search person..."
+          empty_label="All people"
+          compact={true}
+          on_search="search_people"
+          options={[{"All people", "all"} | Enum.map(@people, &{&1.full_name, &1.id})]}
+        />
 
-        <div class="flex items-center gap-1.5">
-          <label
-            for="history-status-trigger"
-            class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider whitespace-nowrap"
-          >
-            Status
-          </label>
-          <div class="w-28">
-            <.select
-              id="history-status"
-              name="status"
-              value={@status}
-              compact={true}
-              options={[{"Active", "active"}, {"Archived", "archived"}]}
-              class="mb-0"
-            />
-          </div>
-        </div>
+        <.select
+          id="history-status"
+          name="status"
+          label="Status"
+          label_position="inline"
+          value={@status}
+          compact={true}
+          options={[{"Active", "active"}, {"Archived", "archived"}]}
+        />
 
-        <div class="flex items-center gap-1.5">
-          <label
-            for="channel_type-trigger"
-            class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider whitespace-nowrap"
-          >
-            Channel
-          </label>
-          <div class="w-32">
-            <.select
-              id="channel_type"
-              name="channel_type"
-              value={@filter_channel_type}
-              compact={true}
-              options={@channel_type_options}
-              class="mb-0"
-            />
-          </div>
-        </div>
+        <.select
+          id="channel_type"
+          name="channel_type"
+          label="Channel"
+          label_position="inline"
+          value={@filter_channel_type}
+          compact={true}
+          options={@channel_type_options}
+        />
       </form>
     </div>
     """

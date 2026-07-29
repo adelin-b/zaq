@@ -198,7 +198,7 @@
 .zaq-control-combobox-trigger {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: var(--zaq-scale-8);
   width: 100%;
   min-height: var(--zaq-scale-48);
   padding-inline: var(--zaq-scale-16);
@@ -206,8 +206,14 @@
   text-align: left;
 }
 
+.zaq-control-combobox-trigger [data-select-label] {
+  flex: 1;
+  min-width: 0;
+}
+
 .zaq-control-combobox-trigger--compact {
   min-height: var(--zaq-scale-32);
+  gap: var(--zaq-scale-4);
 }
 
 /* Native <select> — styled native: UA chrome removed so padding + chevron are predictable.

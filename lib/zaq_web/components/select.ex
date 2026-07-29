@@ -9,6 +9,11 @@ defmodule ZaqWeb.Select do
   attr :id, :string, default: nil
   attr :name, :string, required: true
   attr :label, :string, default: nil
+
+  attr :label_position, :string,
+    default: "block",
+    doc: "`inline` or `block` — same as SearchableSelect."
+
   attr :value, :any, default: nil
   attr :options, :list, required: true
   attr :prompt, :string, default: nil
@@ -18,12 +23,12 @@ defmodule ZaqWeb.Select do
 
   def select(assigns) do
     ~H"""
-    <div class={["zaq-field-row-block", @class]}>
+    <div class={@class}>
       <.searchable_select
         id={@id || @name}
         name={@name}
         label={@label}
-        label_position="block"
+        label_position={@label_position}
         value={@value}
         options={@options}
         empty_label={@prompt || "Select…"}

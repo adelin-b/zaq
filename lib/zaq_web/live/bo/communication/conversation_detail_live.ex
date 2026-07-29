@@ -6,9 +6,11 @@ defmodule ZaqWeb.Live.BO.Communication.ConversationDetailLive do
   use ZaqWeb, :live_view
 
   alias Zaq.NodeRouter
+  alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
   alias ZaqWeb.Live.BO.Communication.MessageHelpers
   alias ZaqWeb.Live.BO.PreviewHelpers
 
+  import ZaqWeb.Components.DesignSystem.Table, only: [table_badge: 1]
   import ZaqWeb.Helpers.DateFormat, only: [format_date: 1, inject_date_separators: 2]
 
   @impl true

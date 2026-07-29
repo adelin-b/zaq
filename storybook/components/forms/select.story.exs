@@ -53,6 +53,18 @@ defmodule Storybook.Components.Forms.Select do
               options: [{"Admin", "admin"}, {"Editor", "editor"}, {"Viewer", "viewer"}],
               value: nil
             }
+          },
+          %Variation{
+            id: :compact_inline,
+            description: "Compact with inline label",
+            attributes: %{
+              name: "status",
+              label: "Status",
+              label_position: "inline",
+              compact: true,
+              options: [{"Active", "active"}, {"Archived", "archived"}],
+              value: "active"
+            }
           }
         ]
       }
