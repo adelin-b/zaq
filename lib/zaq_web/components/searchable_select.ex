@@ -78,7 +78,12 @@ defmodule ZaqWeb.Components.SearchableSelect do
 
   defp inner_markup(assigns) do
     ~H"""
-    <div id={@id} phx-hook="SearchableSelect" data-server-search={@on_search} class="relative">
+    <div
+      id={@id}
+      phx-hook="SearchableSelect"
+      data-server-search={@on_search}
+      class="zaq-searchable-select-root"
+    >
       <input type="hidden" name={@name} value={@value} data-select-value />
       <button
         type="button"

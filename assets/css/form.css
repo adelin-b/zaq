@@ -29,6 +29,10 @@
   flex: 1;
 }
 
+.zaq-field-row-inline-control:has(.zaq-searchable-select-root) {
+  flex: 0 1 auto;
+}
+
 .zaq-field-row-block {
   display: flex;
   flex-direction: column;
@@ -200,6 +204,7 @@
   align-items: center;
   gap: var(--zaq-scale-8);
   width: 100%;
+  min-width: var(--zaq-scale-120);
   min-height: var(--zaq-scale-48);
   padding-inline: var(--zaq-scale-16);
   cursor: pointer;
@@ -245,11 +250,25 @@
 }
 
 /* Searchable combobox — panel chrome (LiveView SearchableSelect, data-select-*) */
+.zaq-searchable-select-root {
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+}
+
+.zaq-field-row-inline-control .zaq-searchable-select-root {
+  width: fit-content;
+}
+
 .zaq-searchable-select-panel {
   background: var(--zaq-surface-color-raised);
   border: var(--zaq-border-thickness-default) solid var(--zaq-border-color-default);
   border-radius: var(--zaq-scale-12);
   margin-top: var(--zaq-scale-4);
+}
+
+.zaq-searchable-select-panel .zaq-control-text {
+  min-width: 0;
 }
 
 .zaq-searchable-select-search-row {

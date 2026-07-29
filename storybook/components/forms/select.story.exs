@@ -22,6 +22,22 @@ defmodule Storybook.Components.Forms.Select do
             }
           },
           %Variation{
+            id: :default_short_value,
+            description: "Default size — short “All” keeps min trigger width",
+            attributes: %{
+              name: "channel_type",
+              label: "Channel",
+              options: [
+                {"All", "all"},
+                {"BO", "bo"},
+                {"Mattermost", "mattermost"},
+                {"Slack", "slack"},
+                {"Email", "email:imap"}
+              ],
+              value: "all"
+            }
+          },
+          %Variation{
             id: :with_prompt,
             description: "With prompt",
             attributes: %{
@@ -64,6 +80,24 @@ defmodule Storybook.Components.Forms.Select do
               compact: true,
               options: [{"Active", "active"}, {"Archived", "archived"}],
               value: "active"
+            }
+          },
+          %Variation{
+            id: :compact_inline_toolbar,
+            description: "Compact toolbar filter — short “All” keeps min trigger width (History Channel)",
+            attributes: %{
+              name: "channel_type",
+              label: "Channel",
+              label_position: "inline",
+              compact: true,
+              options: [
+                {"All", "all"},
+                {"BO", "bo"},
+                {"Mattermost", "mattermost"},
+                {"Slack", "slack"},
+                {"Email", "email:imap"}
+              ],
+              value: "all"
             }
           }
         ]

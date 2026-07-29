@@ -55,6 +55,54 @@ defmodule Storybook.Components.Forms.SearchableSelect do
         />
       </.variation>
 
+      <.variation label="Compact inline label (toolbar)">
+        <ZaqWeb.Components.SearchableSelect.searchable_select
+          id="select-compact-inline-team"
+          name="team_id"
+          label="Team"
+          compact={true}
+          value="all"
+          placeholder="Search team…"
+          empty_label="All teams"
+          options={[{"All teams", "all"}, {"Platform", "1"}, {"Support", "2"}]}
+        />
+      </.variation>
+
+      <.variation label="Compact inline — short “All people”, long options">
+        <ZaqWeb.Components.SearchableSelect.searchable_select
+          id="select-compact-inline-person"
+          name="person_id"
+          label="Person"
+          compact={true}
+          value="all"
+          placeholder="Search person…"
+          empty_label="All people"
+          options={[
+            {"All people", "all"},
+            {"Ada Lovelace", "10"},
+            {"Grace Hopper", "11"},
+            {"Magnus Hirschfeld", "12"}
+          ]}
+        />
+      </.variation>
+
+      <.variation label="Default inline label — short “All” selection">
+        <ZaqWeb.Components.SearchableSelect.searchable_select
+          id="select-default-inline-channel"
+          name="channel_type"
+          label="Channel"
+          value="all"
+          empty_label="All"
+          options={[
+            {"All", "all"},
+            {"BO", "bo"},
+            {"Mattermost", "mattermost"},
+            {"Slack", "slack"},
+            {"Email", "email:imap"}
+          ]}
+        />
+      </.variation>
+
       <.variation label="Allow create">
         <ZaqWeb.Components.SearchableSelect.searchable_select
           id="select-create"
