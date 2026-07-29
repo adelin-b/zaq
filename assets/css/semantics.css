@@ -99,6 +99,12 @@
   --zaq-layout-inline-gap-compact:   var(--zaq-scale-4);  /* chips, pill clusters */
   --zaq-layout-content-inset:        var(--zaq-scale-24); /* inner column (chat transcript) */
   --zaq-layout-grid-gap:             var(--zaq-scale-16); /* card / metric grids */
+
+  /* ── semantics/z-index ─────────────────────────────────────────────────────
+     Overlay stack: drawer/modal at 50; BO flash must outrank overlays.
+     ─────────────────────────────────────────────────────────────────────── */
+  --zaq-z-overlay:  50;
+  --zaq-z-feedback: 60;
 }
 
 

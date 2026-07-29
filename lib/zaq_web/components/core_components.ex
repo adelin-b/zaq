@@ -45,20 +45,36 @@ defmodule ZaqWeb.CoreComponents do
   attr :flash, :map, default: %{}, doc: "the map of flash messages to display"
   attr :title, :string, default: nil
   attr :kind, :atom, values: [:info, :error], doc: "used for styling and flash lookup"
+
+  attr :auto_dismiss, :boolean,
+    default: false,
+    doc: "when true, dismiss after auto_dismiss_duration ms"
+
+  attr :auto_dismiss_duration, :integer, default: 5000, doc: "auto-dismiss delay in milliseconds"
+
+  attr :on_clear, :any,
+    default: nil,
+    doc: "LiveView event or JS when dismissed; defaults to lv:clear-flash"
+
   attr :rest, :global, doc: "the arbitrary HTML attributes to add to the flash container"
 
   slot :inner_block, doc: "the optional inner block that renders the flash message"
 
   def flash(assigns) do
-    assigns = assign_new(assigns, :id, fn -> "flash-#{assigns.kind}" end)
+    assigns =
+      assigns
+      |> assign_new(:id, fn -> "flash-#{assigns.kind}" end)
+      |> assign(:clear_js, flash_clear_js(assigns))
 
     ~H"""
     <div
       :if={msg = render_slot(@inner_block) || Phoenix.Flash.get(@flash, @kind)}
       id={@id}
-      phx-click={JS.push("lv:clear-flash", value: %{key: @kind}) |> hide("##{@id}")}
+      phx-click={@clear_js}
+      phx-hook={@auto_dismiss && "FlashAutoDismiss"}
+      data-auto-dismiss-duration={if @auto_dismiss, do: @auto_dismiss_duration, else: 0}
       role="alert"
-      class="toast toast-top toast-end z-50"
+      class="toast toast-top toast-end zaq-toast-flash"
       {@rest}
     >
       <div class={[
@@ -73,12 +89,28 @@ defmodule ZaqWeb.CoreComponents do
           <p>{msg}</p>
         </div>
         <div class="flex-1" />
-        <button type="button" class="group self-start cursor-pointer" aria-label={gettext("close")}>
+        <button
+          type="button"
+          class="group self-start cursor-pointer"
+          aria-label={gettext("close")}
+          data-flash-dismiss
+          phx-click={@clear_js}
+        >
           <.icon name="hero-x-mark" class="size-5 opacity-40 group-hover:opacity-70" />
         </button>
       </div>
     </div>
     """
+  end
+
+  defp flash_clear_js(%{on_clear: %JS{} = js}), do: js
+
+  defp flash_clear_js(%{on_clear: event, id: id}) when is_binary(event) do
+    JS.push(event) |> hide("##{id}")
+  end
+
+  defp flash_clear_js(%{kind: kind, id: id}) do
+    JS.push("lv:clear-flash", value: %{key: kind}) |> hide("##{id}")
   end
 
   @doc """

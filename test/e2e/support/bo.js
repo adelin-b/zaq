@@ -103,7 +103,7 @@ async function loginToBackOffice(page, options = {}) {
 // Dismisses any visible flash toast so the NEXT test does not match on a
 // leftover success message. Safe to call when no flash is present.
 async function dismissFlash(page) {
-  const flash = page.locator("[id^='flash-']").filter({ hasText: /./ });
+  const flash = page.locator("#ingest-toast, [id^='flash-']").filter({ hasText: /./ });
   const count = await flash.count();
   if (count === 0) return;
 

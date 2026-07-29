@@ -835,7 +835,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
       |> element("#ingest-selected-button")
       |> render_click()
 
-      assert render(view) =~ "Ingestion started."
+      assert has_element?(view, "#ingest-toast", "Ingestion started.")
 
       job = Repo.one!(from j in IngestJob, order_by: [desc: j.inserted_at], limit: 1)
 
@@ -2423,6 +2423,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       # Selection is cleared after ingestion
       refute has_element?(view, "button", "Delete (1)")
+      assert has_element?(view, "#ingest-toast", "Ingestion started.")
       # A job row for the file appears in the jobs table
       assert has_element?(view, "p", "alpha.md")
 
@@ -2445,6 +2446,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       # Selection is cleared after ingestion
       refute has_element?(view, "button", "Delete (1)")
+      assert has_element?(view, "#ingest-toast", "Ingestion started.")
       # A job row for a file inside the folder appears in the jobs table
       assert has_element?(view, "p", ~r/readme\.md/)
     end
@@ -2508,8 +2510,12 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLiveTest do
 
       state = :sys.get_state(view.pid)
 
-      assert Phoenix.Flash.get(state.socket.assigns.flash, :warning) ==
-               "Ingestion started for 1 item(s); 1 failed."
+      assert state.socket.assigns.ingest_toast == %{
+               kind: :info,
+               message: "Ingestion started for 1 item(s); 1 failed."
+             }
+
+      assert has_element?(view, "#ingest-toast")
     end
   end
 

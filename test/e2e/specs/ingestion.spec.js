@@ -99,7 +99,9 @@ async function ensureAsyncMode(page) {
 // Do not assert "(N active)" on the monitor button — jobs can finish before the
 // next LiveView patch in CI, leaving the counter at zero while ingest still succeeded.
 async function expectAsyncIngestionStarted(page, filename) {
-  await expect(page.getByText("Ingestion started.")).toBeVisible()
+  const toast = page.locator("#ingest-toast")
+  await expect(toast).toBeVisible({ timeout: 15_000 })
+  await expect(toast).toContainText("Ingestion started.")
   const drawer = page.locator("#ingestion-jobs-drawer")
   await expect(drawer).toBeVisible({ timeout: 15_000 })
   await expect(

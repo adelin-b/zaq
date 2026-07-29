@@ -74,6 +74,7 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
        prep_seen_at: %{},
        status_filter: "all",
        jobs_drawer_open: false,
+       ingest_toast: nil,
        ingest_mode: "async",
        # Volume state
        volumes: volumes,
@@ -889,9 +890,12 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
       # same patch; PubSub {:job_updated, _} still refreshes for real async runs.
       |> load_entries()
       |> put_ingest_result_flash(result)
-      |> maybe_open_jobs_drawer_after_ingest(result)
 
     {:noreply, socket}
+  end
+
+  def handle_event("dismiss_ingest_toast", _params, socket) do
+    {:noreply, assign(socket, :ingest_toast, nil)}
   end
 
   def handle_event("open_jobs_drawer", _params, socket) do
@@ -2105,8 +2109,11 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
     end
   end
 
-  defp put_ingest_result_flash(socket, {:ok, _jobs}),
-    do: put_flash(socket, :info, "Ingestion started.")
+  defp put_ingest_result_flash(socket, {:ok, _jobs}) do
+    socket
+    |> assign(:jobs_drawer_open, true)
+    |> assign(:ingest_toast, %{kind: :info, message: "Ingestion started."})
+  end
 
   defp put_ingest_result_flash(socket, {:error, {:partial_failure, jobs, errors}}) do
     if jobs == [] do
@@ -2116,24 +2123,16 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
         "No selected records could be ingested (#{length(errors)} failed)."
       )
     else
-      put_flash(
-        socket,
-        :warning,
-        "Ingestion started for #{length(jobs)} item(s); #{length(errors)} failed."
-      )
+      socket
+      |> assign(:jobs_drawer_open, true)
+      |> assign(:ingest_toast, %{
+        kind: :info,
+        message: "Ingestion started for #{length(jobs)} item(s); #{length(errors)} failed."
+      })
     end
   end
 
   defp put_ingest_result_flash(socket, _), do: put_flash(socket, :error, "Ingestion failed.")
-
-  defp maybe_open_jobs_drawer_after_ingest(socket, {:ok, _jobs}),
-    do: assign(socket, :jobs_drawer_open, true)
-
-  defp maybe_open_jobs_drawer_after_ingest(socket, {:error, {:partial_failure, jobs, _errors}})
-       when jobs != [],
-       do: assign(socket, :jobs_drawer_open, true)
-
-  defp maybe_open_jobs_drawer_after_ingest(socket, _result), do: socket
 
   def active_jobs_count(jobs) when is_list(jobs) do
     Enum.count(jobs, &(&1.status in ~w(pending processing)))

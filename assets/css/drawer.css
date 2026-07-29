@@ -7,7 +7,7 @@
 .zaq-drawer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 50;
+  z-index: var(--zaq-z-overlay);
 }
 
 .zaq-drawer-overlay .zaq-bo-modal-backdrop {

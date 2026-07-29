@@ -343,6 +343,11 @@ pre.zaq-file-preview-body {
 
 /* ── Inline feedback ─────────────────────────────────────────────────── */
 
+/* Toast flash (CoreComponents.flash) — above drawer/modal overlays */
+.toast.zaq-toast-flash {
+  z-index: var(--zaq-z-feedback);
+}
+
 /* Shared layout for BO flash rows + inline feedback (matches flash: gap-8, mb-16, py-12 px-16, rounded-xl) */
 .zaq-feedback-banner {
   display: flex;

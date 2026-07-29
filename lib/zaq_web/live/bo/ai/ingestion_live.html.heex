@@ -79,6 +79,18 @@
     </div>
   </div>
 
+  <.flash
+    :if={@ingest_toast}
+    id="ingest-toast"
+    kind={@ingest_toast.kind}
+    flash={%{}}
+    auto_dismiss
+    auto_dismiss_duration={5000}
+    on_clear="dismiss_ingest_toast"
+  >
+    {@ingest_toast.message}
+  </.flash>
+
   <Drawer.drawer
     id="ingestion-jobs-drawer"
     is_open={@jobs_drawer_open}

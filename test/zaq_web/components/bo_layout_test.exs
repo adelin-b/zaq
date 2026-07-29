@@ -135,6 +135,28 @@ defmodule ZaqWeb.Components.BOLayoutTest do
     assert html =~ "version-update-badge"
   end
 
+  test "bo_layout/1 renders inline flash inside content area" do
+    html =
+      render_component(&BOLayout.bo_layout/1,
+        current_user: %{
+          username: "alice",
+          role: %{name: "admin"},
+          portal_consent: nil,
+          email: nil
+        },
+        page_title: "Ingestion",
+        current_path: "/bo/ingestion",
+        flash: %{"info" => "Ingestion started."},
+        inner_block: [%{inner_block: fn _, _ -> "Inner Content" end}]
+      )
+
+    assert html =~ "class=\"p-8\""
+    refute html =~ "id=\"bo-flash-stack\""
+    refute html =~ "zaq-feedback-stack"
+    assert html =~ "id=\"flash-info\""
+    assert html =~ "Ingestion started."
+  end
+
   test "bo_layout/1 hides update badge when disabled" do
     html =
       render_component(&BOLayout.bo_layout/1,
