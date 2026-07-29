@@ -93,9 +93,16 @@ async function ensureAsyncMode(page) {
   await expect(page.locator("#ingest-mode-async")).toHaveClass(/zaq-btn-tertiary--active/)
 }
 
-async function expectAsyncIngestionStarted(page) {
+// Async enqueue: flash confirms dispatch; the jobs drawer auto-opens on success.
+// Do not assert "(N active)" on the monitor button — jobs can finish before the
+// next LiveView patch in CI, leaving the counter at zero while ingest still succeeded.
+async function expectAsyncIngestionStarted(page, filename) {
   await expect(page.getByText("Ingestion started.")).toBeVisible()
-  await expect(page.locator("#monitor-jobs-button")).toContainText(/active\)/, { timeout: 15_000 })
+  const drawer = page.locator("#ingestion-jobs-drawer")
+  await expect(drawer).toBeVisible({ timeout: 15_000 })
+  await expect(
+    drawer.locator(".zaq-card-default").filter({ hasText: filename }).first()
+  ).toBeVisible({ timeout: 15_000 })
 }
 
 // Async completion: PubSub refreshes the file row when the job finishes.
@@ -109,7 +116,7 @@ async function waitForAsyncRowBadge(page, filename, badge) {
   }
 }
 
-// Jobs drawer: open explicitly — do not rely on auto-open for synchronization.
+// Jobs drawer: open explicitly when verifying a terminal status after the row badge.
 async function assertJobInDrawer(page, filename, status) {
   await page.locator("#monitor-jobs-button").click()
   await expect(page.locator("#ingestion-jobs-drawer")).toBeVisible({ timeout: 10_000 })
@@ -125,7 +132,7 @@ async function assertJobInDrawer(page, filename, status) {
 // Uses check() (idempotent) instead of a point-in-time isChecked() read so that
 // an in-flight PubSub handle_info re-render cannot produce a stale DOM snapshot
 // that causes the selection to be toggled off.
-async function selectAndIngest(page, row) {
+async function selectAndIngest(page, row, filename) {
   // Clear any stale flash FIRST so the "Ingestion started." check below cannot
   // match a leftover toast from a previous call and silently skip the real wait.
   await dismissFlash(page)
@@ -143,7 +150,7 @@ async function selectAndIngest(page, row) {
   // click can race ahead of toggle_select and enqueue nothing.
   await expect(ingestButton).toBeEnabled()
   await ingestButton.click()
-  await expectAsyncIngestionStarted(page)
+  await expectAsyncIngestionStarted(page, filename)
   // Dismiss the "Ingestion started." toast so a later call does not match on it.
   await dismissFlash(page)
 }
@@ -263,7 +270,7 @@ test.describe("Ingestion", () => {
     const row = fileRow(page, pdfFilename)
     await expect(row).toBeVisible()
 
-    await selectAndIngest(page, row)
+    await selectAndIngest(page, row, pdfFilename)
     await waitForAsyncRowBadge(page, pdfFilename, "ingested")
     await assertJobInDrawer(page, pdfFilename, "completed")
 
@@ -283,12 +290,12 @@ test.describe("Ingestion", () => {
     // (Previously the cond checked ingested_at before job_status == "failed".)
 
     await page.request.get("/e2e/processor/fail?count=1")
-    await selectAndIngest(page, row)
+    await selectAndIngest(page, row, pdfFilename)
     await waitForAsyncRowBadge(page, pdfFilename, "failed")
     await assertJobInDrawer(page, pdfFilename, "failed")
 
     // Restore the "ingested" state before the model-change step.
-    await selectAndIngest(page, row)
+    await selectAndIngest(page, row, pdfFilename)
     await waitForAsyncRowBadge(page, pdfFilename, "ingested")
 
     // ── Step 4: Change embedding model → destructive save ────────────────────
@@ -374,12 +381,12 @@ test.describe("Ingestion", () => {
 
     await page.request.get("/e2e/processor/fail?count=1")
 
-    await selectAndIngest(page, rowAfterReset)
+    await selectAndIngest(page, rowAfterReset, pdfFilename)
     await waitForAsyncRowBadge(page, pdfFilename, "failed")
 
     // ── Step 7: Re-ingest (no failure) → "ingested" tag must return ──────────
 
-    await selectAndIngest(page, rowAfterReset)
+    await selectAndIngest(page, rowAfterReset, pdfFilename)
     await waitForAsyncRowBadge(page, pdfFilename, "ingested")
   })
 
@@ -428,7 +435,7 @@ test.describe("Ingestion", () => {
     // ── Ingest the uploaded PDF ───────────────────────────────────────────
     const row = fileRow(page, pdfFilename)
     await expect(row).toBeVisible({ timeout: 10_000 })
-    await selectAndIngest(page, row)
+    await selectAndIngest(page, row, pdfFilename)
     await waitForAsyncRowBadge(page, pdfFilename, "ingested")
     await assertJobInDrawer(page, pdfFilename, "completed")
 
