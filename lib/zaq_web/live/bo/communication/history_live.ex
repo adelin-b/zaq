@@ -14,7 +14,6 @@ defmodule ZaqWeb.Live.BO.Communication.HistoryLive do
 
   use ZaqWeb, :live_view
 
-  import ZaqWeb.History.ActiveArchivedTabs
   import ZaqWeb.History.BulkSelectionBar
   import ZaqWeb.History.ConversationFilters
   import ZaqWeb.History.ConversationTable
@@ -71,43 +70,17 @@ defmodule ZaqWeb.Live.BO.Communication.HistoryLive do
   end
 
   @impl true
-  def handle_event("filter", params, socket) do
-    current_user = socket.assigns[:current_user]
-    user_id = current_user && current_user.id
-
-    scope =
-      if socket.assigns.is_admin,
-        do: Map.get(params, "scope", socket.assigns.filter_scope),
-        else: "own"
-
-    channel_type = Map.get(params, "channel_type", socket.assigns.filter_channel_type)
-
-    team_id =
-      if scope == "all",
-        do: Map.get(params, "team_id", socket.assigns.filter_team_id),
-        else: "all"
-
-    person_id =
-      if scope == "all",
-        do: Map.get(params, "person_id", socket.assigns.filter_person_id),
-        else: "all"
-
-    opts =
-      [{:status, socket.assigns.status}]
-      |> then(fn o -> if scope == "own", do: [{:user_id, user_id} | o], else: o end)
-      |> maybe_filter(:channel_type, channel_type)
-      |> maybe_filter_int(:team_id, team_id)
-      |> maybe_filter_int(:person_id, person_id)
-
-    {:noreply,
-     socket
-     |> assign(:conversations, load_conversations(opts))
-     |> assign(:filter_scope, scope)
-     |> assign(:filter_channel_type, channel_type)
-     |> assign(:filter_team_id, team_id)
-     |> assign(:filter_person_id, person_id)
-     |> assign(:selected, MapSet.new())}
+  def handle_event("filter", %{"status" => status} = params, socket)
+      when status in ["active", "archived"] do
+    if status != socket.assigns.status do
+      path = if status == "archived", do: ~p"/bo/history/archived", else: ~p"/bo/history"
+      {:noreply, push_patch(socket, to: path)}
+    else
+      apply_filter(params, socket)
+    end
   end
+
+  def handle_event("filter", params, socket), do: apply_filter(params, socket)
 
   def handle_event("search_people", %{"query" => query}, socket) do
     {:noreply, assign(socket, :people, People.search_people(query, [], 20))}
@@ -194,6 +167,44 @@ defmodule ZaqWeb.Live.BO.Communication.HistoryLive do
   # ---------------------------------------------------------------------------
   # Helpers
   # ---------------------------------------------------------------------------
+
+  defp apply_filter(params, socket) do
+    current_user = socket.assigns[:current_user]
+    user_id = current_user && current_user.id
+
+    scope =
+      if socket.assigns.is_admin,
+        do: Map.get(params, "scope", socket.assigns.filter_scope),
+        else: "own"
+
+    channel_type = Map.get(params, "channel_type", socket.assigns.filter_channel_type)
+
+    team_id =
+      if scope == "all",
+        do: Map.get(params, "team_id", socket.assigns.filter_team_id),
+        else: "all"
+
+    person_id =
+      if scope == "all",
+        do: Map.get(params, "person_id", socket.assigns.filter_person_id),
+        else: "all"
+
+    opts =
+      [{:status, socket.assigns.status}]
+      |> then(fn o -> if scope == "own", do: [{:user_id, user_id} | o], else: o end)
+      |> maybe_filter(:channel_type, channel_type)
+      |> maybe_filter_int(:team_id, team_id)
+      |> maybe_filter_int(:person_id, person_id)
+
+    {:noreply,
+     socket
+     |> assign(:conversations, load_conversations(opts))
+     |> assign(:filter_scope, scope)
+     |> assign(:filter_channel_type, channel_type)
+     |> assign(:filter_team_id, team_id)
+     |> assign(:filter_person_id, person_id)
+     |> assign(:selected, MapSet.new())}
+  end
 
   defp remove_conversations(socket, ids) do
     id_set = MapSet.new(ids)

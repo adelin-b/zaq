@@ -9,18 +9,25 @@ const {
 
 const HISTORY_PATH = "/bo/history";
 
+async function pickHistorySelect(page, containerId, optionLabel) {
+  const container = page.locator(`#${containerId}`);
+  await container.locator("[data-select-trigger]").click();
+  await container.locator(`[data-select-option="${optionLabel}"]`).click();
+  await waitForLiveViewSettled(page);
+}
+
 test.describe("BO History page", () => {
   test.beforeEach(async ({ page, request }) => {
     await resetE2EState(request);
     await loginToBackOffice(page);
   });
 
-  test("renders tabs, filters, admin scope, and table shell", async ({ page }) => {
+  test("renders filters, admin scope, and table shell", async ({ page }) => {
     await gotoBackOfficeLive(page, HISTORY_PATH);
 
-    await expect(page.getByRole("link", { name: "Active" })).toBeVisible();
-    await expect(page.getByRole("link", { name: "Archived" })).toBeVisible();
-    await expect(page.locator("#channel_type")).toBeVisible();
+    await expect(page.locator("#history-status-trigger")).toBeVisible();
+    await expect(page.locator("#history-status-trigger")).toContainText("Active");
+    await expect(page.locator("#channel_type-trigger")).toBeVisible();
 
     await expect(page.getByRole("columnheader", { name: "Conversation" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Channel" })).toBeVisible();
@@ -37,7 +44,7 @@ test.describe("BO History page", () => {
     ).toBeVisible();
   });
 
-  test("archived tab lists archived conversations only", async ({ page, request }) => {
+  test("archived status lists archived conversations only", async ({ page, request }) => {
     const archivedTitle = `E2E History Archived ${Date.now()}`;
     await createE2EConversation(request, {
       title: archivedTitle,
@@ -48,16 +55,14 @@ test.describe("BO History page", () => {
     await gotoBackOfficeLive(page, HISTORY_PATH);
     await expect(page.locator("tr").filter({ hasText: archivedTitle })).not.toBeVisible();
 
-    await page.getByRole("link", { name: "Archived" }).click();
-    await waitForLiveViewSettled(page);
+    await pickHistorySelect(page, "history-status", "Archived");
     await expect(page).toHaveURL(/\/bo\/history\/archived/);
     await expect(page.locator("tr").filter({ hasText: archivedTitle })).toBeVisible();
 
     const archivedRow = page.locator("tr").filter({ hasText: archivedTitle });
     await expect(archivedRow.getByRole("button", { name: "Archive" })).toHaveCount(0);
 
-    await page.getByRole("link", { name: "Active" }).click();
-    await waitForLiveViewSettled(page);
+    await pickHistorySelect(page, "history-status", "Active");
     await expect(page).toHaveURL(/\/bo\/history$/);
     await expect(page.locator("tr").filter({ hasText: archivedTitle })).not.toBeVisible();
   });
@@ -75,8 +80,7 @@ test.describe("BO History page", () => {
       page.locator("tr").filter({ hasText: "E2E Unsupported Source Conversation" })
     ).toBeVisible();
 
-    await page.locator("#channel_type").selectOption("mattermost");
-    await waitForLiveViewSettled(page);
+    await pickHistorySelect(page, "channel_type", "Mattermost");
 
     await expect(page.locator("tr").filter({ hasText: mmTitle })).toBeVisible();
     await expect(
@@ -91,8 +95,7 @@ test.describe("BO History page", () => {
     await createE2EConversation(request, { title: two, channel_type: "bo" });
 
     await gotoBackOfficeLive(page, HISTORY_PATH);
-    await page.locator("#channel_type").selectOption("bo");
-    await waitForLiveViewSettled(page);
+    await pickHistorySelect(page, "channel_type", "BO");
 
     const rowOne = page.locator("tr").filter({ hasText: one });
     await expect(rowOne).toBeVisible();

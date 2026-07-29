@@ -17,6 +17,7 @@ defmodule Storybook.History.ConversationFilters do
         description: "Non-admin: channel filter only",
         attributes: %{
           conversation_count: 3,
+          status: "active",
           is_admin: false,
           filter_scope: "own",
           filter_channel_type: "all",
@@ -31,6 +32,7 @@ defmodule Storybook.History.ConversationFilters do
         description: "Super-admin, My History scope",
         attributes: %{
           conversation_count: 12,
+          status: "active",
           is_admin: true,
           filter_scope: "own",
           filter_channel_type: "bo",
@@ -45,6 +47,7 @@ defmodule Storybook.History.ConversationFilters do
         description: "Super-admin, All Users — team and person searchable selects visible",
         attributes: %{
           conversation_count: 120,
+          status: "archived",
           is_admin: true,
           filter_scope: "all",
           filter_channel_type: "mattermost",

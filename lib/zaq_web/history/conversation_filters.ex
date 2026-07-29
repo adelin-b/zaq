@@ -7,10 +7,21 @@ defmodule ZaqWeb.History.ConversationFilters do
   use Phoenix.Component
 
   import ZaqWeb.Components.SearchableSelect
+  import ZaqWeb.Select, only: [select: 1]
 
   alias ZaqWeb.Components.DesignSystem.Toggle, as: DSToggle
 
+  @channel_type_options [
+    {"All", "all"},
+    {"BO", "bo"},
+    {"Mattermost", "mattermost"},
+    {"Slack", "slack"},
+    {"Email", "email:imap"},
+    {"API", "api"}
+  ]
+
   attr :conversation_count, :integer, required: true
+  attr :status, :string, required: true, doc: "`active` or `archived` — default route is active."
   attr :is_admin, :boolean, required: true
   attr :filter_scope, :string, required: true
   attr :filter_channel_type, :string, required: true
@@ -21,7 +32,9 @@ defmodule ZaqWeb.History.ConversationFilters do
 
   def conversation_filters(assigns) do
     assigns =
-      assign(assigns, :count_suffix, "#{assigns.conversation_count} conversations")
+      assigns
+      |> assign(:count_suffix, "#{assigns.conversation_count} conversations")
+      |> assign(:channel_type_options, @channel_type_options)
 
     ~H"""
     <div class="zaq-ingestion-chrome-row zaq-ingestion-chrome-row--spaced">
@@ -81,27 +94,40 @@ defmodule ZaqWeb.History.ConversationFilters do
 
         <div class="flex items-center gap-1.5">
           <label
-            for="channel_type"
-            class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider"
+            for="history-status-trigger"
+            class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider whitespace-nowrap"
+          >
+            Status
+          </label>
+          <div class="w-28">
+            <.select
+              id="history-status"
+              name="status"
+              value={@status}
+              compact={true}
+              options={[{"Active", "active"}, {"Archived", "archived"}]}
+              class="mb-0"
+            />
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <label
+            for="channel_type-trigger"
+            class="font-mono text-[0.7rem] text-black/40 uppercase tracking-wider whitespace-nowrap"
           >
             Channel
           </label>
-          <select
-            id="channel_type"
-            name="channel_type"
-            class="font-mono text-[0.78rem] text-black border border-black/10 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-[#03b6d4]"
-          >
-            <option value="all" selected={@filter_channel_type == "all"}>All</option>
-            <option value="bo" selected={@filter_channel_type == "bo"}>BO</option>
-            <option value="mattermost" selected={@filter_channel_type == "mattermost"}>
-              Mattermost
-            </option>
-            <option value="slack" selected={@filter_channel_type == "slack"}>Slack</option>
-            <option value="email:imap" selected={@filter_channel_type == "email:imap"}>
-              Email
-            </option>
-            <option value="api" selected={@filter_channel_type == "api"}>API</option>
-          </select>
+          <div class="w-32">
+            <.select
+              id="channel_type"
+              name="channel_type"
+              value={@filter_channel_type}
+              compact={true}
+              options={@channel_type_options}
+              class="mb-0"
+            />
+          </div>
         </div>
       </form>
     </div>

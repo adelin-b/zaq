@@ -5,10 +5,9 @@
   current_path={@current_path}
   features_version={@features_version}
 >
-  <.active_archived_tabs live_action={@live_action} />
-
   <.conversation_filters
     conversation_count={length(@conversations)}
+    status={@status}
     is_admin={@is_admin}
     filter_scope={@filter_scope}
     filter_channel_type={@filter_channel_type}
