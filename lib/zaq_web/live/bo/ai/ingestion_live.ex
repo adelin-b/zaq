@@ -884,6 +884,10 @@ defmodule ZaqWeb.Live.BO.AI.IngestionLive do
       socket
       |> assign(selected: MapSet.new())
       |> load_jobs()
+      # With Oban testing: :inline (E2E/ExUnit), async jobs finish before this handler
+      # returns. Refresh entries now so the file browser shows terminal badges in the
+      # same patch; PubSub {:job_updated, _} still refreshes for real async runs.
+      |> load_entries()
       |> put_ingest_result_flash(result)
       |> maybe_open_jobs_drawer_after_ingest(result)
 
