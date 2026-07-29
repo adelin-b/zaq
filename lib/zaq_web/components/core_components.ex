@@ -64,7 +64,7 @@ defmodule ZaqWeb.CoreComponents do
     assigns =
       assigns
       |> assign_new(:id, fn -> "flash-#{assigns.kind}" end)
-      |> assign(:clear_js, flash_clear_js(assigns))
+      |> then(&assign(&1, :clear_js, flash_clear_js(&1)))
 
     ~H"""
     <div
