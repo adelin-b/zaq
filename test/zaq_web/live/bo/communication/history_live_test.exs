@@ -127,6 +127,19 @@ defmodule ZaqWeb.Live.BO.Communication.HistoryLiveTest do
       assert MapSet.member?(state.socket.assigns.selected, conv.id)
     end
 
+    test "shows bulk selection bar after row checkbox click", %{conn: conn, user: user} do
+      conv = create_conv(user.id, %{title: "Bulk Bar Conv"})
+      {:ok, view, _html} = live(conn, ~p"/bo/history")
+
+      html =
+        view
+        |> element("#conv-#{conv.id} input[type=\"checkbox\"]")
+        |> render_click()
+
+      assert html =~ "1 selected"
+      assert html =~ "phx-click=\"bulk_archive\""
+    end
+
     test "removes a conversation id from selected set when already selected", %{
       conn: conn,
       user: user

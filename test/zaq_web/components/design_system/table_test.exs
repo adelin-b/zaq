@@ -125,6 +125,7 @@ defmodule ZaqWeb.Components.DesignSystem.TableTest do
     assert String.contains?(html, "zaq-bo-checkbox")
     assert String.contains?(html, ~s(phx-click="toggle"))
     refute String.contains?(html, "stopPropagation")
+    refute String.contains?(html, "stop_propagation")
   end
 
   test "table_selection_bar/1 hidden when selected_count is zero" do
