@@ -201,7 +201,7 @@ test.describe("Knowledge Ops Lead journeys", () => {
 
     const row = page.locator("tr", { hasText: "E2E Unsupported Source Conversation" }).first();
     await expect(row).toBeVisible();
-    await row.getByRole("link", { name: "View →" }).click();
+    await row.getByText("E2E Unsupported Source Conversation").click();
 
     await expect(page).toHaveURL(/\/bo\/conversations\//);
 
