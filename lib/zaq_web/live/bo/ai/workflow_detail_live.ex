@@ -302,14 +302,18 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
         <div class="flex items-start justify-between mb-6">
           <div class="min-w-0 mr-6">
             <div class="flex items-center gap-3 mb-1.5">
-              <h2 class="font-mono text-[1rem] font-bold text-black truncate">
+              <h2
+                class="zaq-text-h3 truncate"
+                style="color: var(--zaq-text-color-body-default)"
+              >
                 {@workflow.name}
               </h2>
               <.workflow_status_badge status={@workflow.status} />
             </div>
             <p
               :if={@workflow.description}
-              class="font-mono text-[0.82rem] text-black/50 leading-relaxed"
+              class="zaq-text-body-sm"
+              style="color: var(--zaq-text-color-body-secondary)"
             >
               {@workflow.description}
             </p>
@@ -511,7 +515,7 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
                       variant={:secondary}
                       navigate={~p"/bo/workflows/#{@workflow.id}/runs/#{run.id}"}
                     >
-                      View
+                      Check details
                     </DSButton.button>
                   </.table_actions>
                 </.table_cell>

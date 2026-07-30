@@ -18,6 +18,7 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
   alias Zaq.{Event, NodeRouter}
   alias ZaqWeb.Components.BOLayout
   alias ZaqWeb.Components.DesignSystem.Breadcrumb, as: DSBreadcrumb
+  alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
   alias ZaqWeb.Live.BO.AI.WorkflowResultHelpers
   alias ZaqWeb.Live.BO.Communication.MessageHelpers
 
@@ -337,17 +338,23 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
 
         <%!-- Run header --%>
         <div class="flex items-start justify-between mb-6">
-          <div>
-            <h2 class="font-mono text-[1rem] font-bold text-black">
-              Run <code class="text-[0.9em] font-mono">{short_id(@run.id)}</code>
-            </h2>
-            <div class="flex items-center gap-3 mt-2">
+          <div class="min-w-0 mr-6">
+            <div class="flex items-center gap-3 mb-1.5">
+              <h2
+                class="zaq-text-h3 truncate"
+                style="color: var(--zaq-text-color-body-default)"
+              >
+                Run <code class="zaq-text-code">{short_id(@run.id)}</code>
+              </h2>
               <.run_status_badge status={@run.status} />
-              <span class="font-mono text-[0.75rem] text-black/60">
-                Started {format_datetime_seconds(@run.started_at)} ·
-                <.run_duration run={@run} now={@now} />
-              </span>
             </div>
+            <p
+              class="zaq-text-body-sm"
+              style="color: var(--zaq-text-color-body-secondary)"
+            >
+              Started {format_datetime_seconds(@run.started_at)} ·
+              <.run_duration run={@run} now={@now} />
+            </p>
           </div>
           <div class="flex items-center gap-2">
             <button
@@ -385,13 +392,14 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
             >
               Reject
             </button>
-            <button
+            <DSButton.button
               :if={@run.status == "failed"}
+              variant={:secondary}
+              icon="hero-arrow-path"
               phx-click="retry_run"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-[#03b6d4]/30 text-[#03b6d4] hover:bg-[#03b6d4]/10 transition-colors"
             >
               Retry
-            </button>
+            </DSButton.button>
           </div>
         </div>
 
@@ -482,12 +490,14 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
               {interrupted_reason(@step_runs)}
             </p>
           </div>
-          <button
+          <DSButton.button
+            class="flex-shrink-0"
+            variant={:secondary}
+            icon="hero-arrow-path"
             phx-click="retry_run"
-            class="flex-shrink-0 font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-[#03b6d4]/30 text-[#03b6d4] hover:bg-[#03b6d4]/10 transition-colors"
           >
             Retry
-          </button>
+          </DSButton.button>
         </div>
 
         <%!-- Incomplete notice — surfaces WHERE the run stopped and WHY. An
