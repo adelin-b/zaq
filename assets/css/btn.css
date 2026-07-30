@@ -40,6 +40,7 @@
   --zaq-btn-secondary-color-bg-resting:  transparent;
   --zaq-btn-secondary-color-bg-hover:    var(--zaq-color-neutral-200);
   --zaq-btn-secondary-color-bg-disabled: transparent;
+  --zaq-btn-secondary-color-bg-active: transparent;
 
   /* btn/secondary/thickness/border */
   --zaq-btn-secondary-thickness-border-resting: var(--zaq-scale-1);
@@ -48,15 +49,18 @@
   --zaq-btn-secondary-color-border-resting:  var(--zaq-color-neutral-300);
   --zaq-btn-secondary-color-border-hover:    var(--zaq-color-blue-300);
   --zaq-btn-secondary-color-border-disabled: var(--zaq-color-neutral-300);
+  --zaq-btn-secondary-color-border-active:    var(--zaq-color-blue-400);
 
   /* btn/secondary/color/text */
   --zaq-btn-secondary-color-text-resting:  var(--zaq-color-black-200);
-  --zaq-btn-secondary-color-text-hover:    var(--zaq-color-black-300);
+  --zaq-btn-secondary-color-text-hover:    var(--zaq-color-blue-400);
+  --zaq-btn-secondary-color-text-active:    var(--zaq-color-blue-400);
   --zaq-btn-secondary-color-text-disabled: var(--zaq-color-black-100);
 
   /* btn/secondary/color/icon */
   --zaq-btn-secondary-color-icon-resting:  var(--zaq-color-blue-300);
   --zaq-btn-secondary-color-icon-hover:    var(--zaq-color-blue-400);
+  --zaq-btn-secondary-color-icon-active:    var(--zaq-color-blue-400);
   --zaq-btn-secondary-color-icon-disabled: var(--zaq-color-black-100);
 
   /* btn/ghost */
@@ -132,7 +136,7 @@
   transition:      background 150ms ease, color 150ms ease, border-color 150ms ease;
 }
 
-/* Zaq-btn-pill — pill shape for secondary outline chips only; compose with .zaq-btn-secondary */
+/* Zaq-btn-pill — pill shape for secondary outline chips; compose with .zaq-btn-secondary [.zaq-btn-secondary--active] */
 .zaq-btn-pill {
   display:         inline-flex;
   align-items:     center;
@@ -198,6 +202,21 @@
   background-color: var(--zaq-btn-secondary-color-bg-hover);
   color:            var(--zaq-btn-secondary-color-text-hover);
   border-color:     var(--zaq-btn-secondary-color-border-hover);
+}
+
+/* Compose: .zaq-btn-pill .zaq-btn-secondary [.zaq-btn-secondary--active] */
+.zaq-btn-pill.zaq-btn-secondary.zaq-btn-secondary--active,
+.zaq-btn.zaq-btn-secondary.zaq-btn-secondary--active {
+  background-color: var(--zaq-btn-secondary-color-bg-active);
+  color:            var(--zaq-btn-secondary-color-text-active);
+  border-color:     var(--zaq-btn-secondary-color-border-active);
+}
+
+.zaq-btn-pill.zaq-btn-secondary.zaq-btn-secondary--active:hover,
+.zaq-btn.zaq-btn-secondary.zaq-btn-secondary--active:hover {
+  background-color: var(--zaq-btn-secondary-color-bg-active);
+  color:            var(--zaq-btn-secondary-color-text-active);
+  border-color:     var(--zaq-btn-secondary-color-border-active);
 }
 
 .zaq-btn-secondary:disabled,

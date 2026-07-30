@@ -6,7 +6,7 @@ defmodule Storybook.Components.Forms.Button do
   def description do
     "BO action button (`btn.css`). Variants: `:primary`, `:secondary`, `:ghost`, `:tertiary`. " <>
       "Shapes: `:default` or `:pill` (secondary chips). Optional `icon` / `icon_only`. " <>
-      "Tertiary supports `active` for selected toolbar chips. " <>
+      "Tertiary and secondary pill support `active` for selected chips. " <>
       "Destructive actions use the **Danger action** group (`variant={:tertiary}` + `danger`). " <>
       "Any variant supports `loading` + `loading_label` for async `phx-click`. " <>
       "**Link as button:** pass `navigate`, `href`, or `patch` to render a `<.link>` with button styling (page navigation, not `phx-click`)."
@@ -243,6 +243,12 @@ defmodule Storybook.Components.Forms.Button do
           description: "Disabled",
           attributes: %{shape: :pill, variant: :secondary, disabled: true},
           slots: ["Unavailable"]
+        },
+        %Variation{
+          id: :active,
+          description: "Active (selected chip)",
+          attributes: %{shape: :pill, variant: :secondary, active: true},
+          slots: ["Selected"]
         }
       ]
     }

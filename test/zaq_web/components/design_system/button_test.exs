@@ -59,6 +59,30 @@ defmodule ZaqWeb.Components.DesignSystem.ButtonTest do
     assert html =~ "zaq-btn-danger"
   end
 
+  test "button/1 secondary pill active adds zaq-btn-secondary--active" do
+    html =
+      render_component(&Button.button/1,
+        variant: :secondary,
+        shape: :pill,
+        active: true,
+        inner_block: [%{inner_block: fn _, _ -> "Chip" end}]
+      )
+
+    assert html =~ "zaq-btn-pill"
+    assert html =~ "zaq-btn-secondary--active"
+  end
+
+  test "button/1 secondary default shape ignores active" do
+    html =
+      render_component(&Button.button/1,
+        variant: :secondary,
+        active: true,
+        inner_block: [%{inner_block: fn _, _ -> "Cancel" end}]
+      )
+
+    refute html =~ "zaq-btn-secondary--active"
+  end
+
   test "button/1 with icon left and right" do
     left_html =
       render_component(&Button.button/1,

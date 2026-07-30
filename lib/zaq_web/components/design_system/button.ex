@@ -8,7 +8,8 @@ defmodule ZaqWeb.Components.DesignSystem.Button do
   Optional `icon` with `icon_position` (`:left` default, `:right`).
   Set `icon_only` for square icon buttons — pass `aria-label` via attributes.
 
-  Tertiary-only modifiers: `active` (`.zaq-btn-tertiary--active`), `danger` (`.zaq-btn-danger`).
+  Modifiers: `active` (`.zaq-btn-tertiary--active` on `:tertiary`, `.zaq-btn-secondary--active` on
+  `:secondary` + `:pill`), `danger` (`.zaq-btn-danger`, tertiary only).
 
   Set `loading` to attach `phx-hook="LoadingActionButton"` and swap label for a spinner
   + `loading_label` while a `phx-click` is in flight (any variant).
@@ -40,7 +41,8 @@ defmodule ZaqWeb.Components.DesignSystem.Button do
 
   attr :active, :boolean,
     default: false,
-    doc: "Tertiary active chip — adds `.zaq-btn-tertiary--active`."
+    doc:
+      "Selected chip — `.zaq-btn-tertiary--active` on `:tertiary`, `.zaq-btn-secondary--active` on `:secondary` + `:pill`."
 
   attr :danger, :boolean,
     default: false,
@@ -164,7 +166,7 @@ defmodule ZaqWeb.Components.DesignSystem.Button do
       shape_class(assigns.shape),
       variant_class(assigns.variant),
       icon_only_class(assigns),
-      tertiary_active_class(assigns),
+      active_modifier_class(assigns),
       danger_class(assigns),
       typography_class(assigns),
       loading_toggle_classes(Map.get(assigns, :use_loading_ui?, false)),
@@ -182,8 +184,12 @@ defmodule ZaqWeb.Components.DesignSystem.Button do
   defp icon_only_class(%{icon_only: true}), do: "zaq-btn-icon"
   defp icon_only_class(_), do: nil
 
-  defp tertiary_active_class(%{variant: :tertiary, active: true}), do: "zaq-btn-tertiary--active"
-  defp tertiary_active_class(_), do: nil
+  defp active_modifier_class(%{variant: :tertiary, active: true}), do: "zaq-btn-tertiary--active"
+
+  defp active_modifier_class(%{variant: :secondary, shape: :pill, active: true}),
+    do: "zaq-btn-secondary--active"
+
+  defp active_modifier_class(_), do: nil
 
   defp danger_class(%{danger: true}), do: "zaq-btn-danger"
   defp danger_class(_), do: nil
