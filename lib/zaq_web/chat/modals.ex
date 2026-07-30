@@ -68,6 +68,7 @@ defmodule ZaqWeb.Chat.Modals do
           <div class="flex items-center justify-between px-6 pt-5 pb-3">
             <h3 class="text-base font-semibold" style="color:#2c2b28;">Provide feedback</h3>
             <button
+              type="button"
               phx-click="close_feedback_modal"
               class="transition-colors text-[#b8b5ae] hover:text-[#5c5a55]"
             >
@@ -82,50 +83,55 @@ defmodule ZaqWeb.Chat.Modals do
               </svg>
             </button>
           </div>
-          <div class="px-6 pb-4">
-            <div class="flex flex-wrap gap-2 mb-4">
-              <%= for reason <- Zaq.Engine.Telemetry.FeedbackReasons.list() do %>
-                <button
-                  phx-click="toggle_feedback_reason"
-                  phx-value-reason={reason}
-                  data-reason-selected={to_string(reason in @feedback_reasons)}
-                  class="px-3.5 py-1.5 rounded-full text-sm border transition-all duration-150"
-                  style={
-                    if reason in @feedback_reasons,
-                      do: "background:#03b6d4; color:white; border-color:#03b6d4;",
-                      else: "background:#faf9f7; color:#5c5a55; border-color:#e0ddd8;"
-                  }
-                >
-                  {reason}
-                </button>
-              <% end %>
+          <form id="feedback-modal-form" phx-submit="submit_feedback">
+            <div class="px-6 pb-4">
+              <div class="flex flex-wrap gap-2 mb-4">
+                <%= for reason <- Zaq.Engine.Telemetry.FeedbackReasons.list() do %>
+                  <button
+                    type="button"
+                    phx-click="toggle_feedback_reason"
+                    phx-value-reason={reason}
+                    data-reason-selected={to_string(reason in @feedback_reasons)}
+                    class="px-3.5 py-1.5 rounded-full text-sm border transition-all duration-150"
+                    style={
+                      if reason in @feedback_reasons,
+                        do: "background:#03b6d4; color:white; border-color:#03b6d4;",
+                        else: "background:#faf9f7; color:#5c5a55; border-color:#e0ddd8;"
+                    }
+                  >
+                    {reason}
+                  </button>
+                <% end %>
+              </div>
+              <textarea
+                id="feedback-modal-comment"
+                phx-change="update_feedback_comment"
+                name="comment"
+                rows="4"
+                placeholder="Tell us more (optional)"
+                class="w-full text-sm rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-[#03b6d4]/20 transition-all"
+                style="border:1px solid #e0ddd8; background:#faf9f7; color:#2c2b28;"
+              ><%= @feedback_comment %></textarea>
             </div>
-            <textarea
-              phx-change="update_feedback_comment"
-              name="comment"
-              rows="4"
-              placeholder="Tell us more (optional)"
-              class="w-full text-sm rounded-xl px-4 py-3 resize-none focus:outline-none focus:ring-2 focus:ring-[#03b6d4]/20 transition-all"
-              style="border:1px solid #e0ddd8; background:#faf9f7; color:#2c2b28;"
-            ><%= @feedback_comment %></textarea>
-          </div>
-          <div class="flex items-center justify-end gap-3 px-6 pb-5">
-            <button
-              phx-click="close_feedback_modal"
-              class="px-4 py-2 text-sm transition-colors"
-              style="color:#9e9b94;"
-            >
-              Cancel
-            </button>
-            <button
-              id="submit-feedback-button"
-              phx-click="submit_feedback"
-              class="px-5 py-2 text-sm font-medium text-white rounded-lg transition-all active:scale-95"
-              style="background:#03b6d4;"
-            >
-              Submit
-            </button>
-          </div>
+            <div class="flex items-center justify-end gap-3 px-6 pb-5">
+              <button
+                type="button"
+                phx-click="close_feedback_modal"
+                class="px-4 py-2 text-sm transition-colors"
+                style="color:#9e9b94;"
+              >
+                Cancel
+              </button>
+              <button
+                id="submit-feedback-button"
+                type="submit"
+                class="px-5 py-2 text-sm font-medium text-white rounded-lg transition-all active:scale-95"
+                style="background:#03b6d4;"
+              >
+                Submit
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     <% end %>

@@ -6,6 +6,7 @@ defmodule ZaqWeb.Live.BO.Communication.ConversationDetailLiveTest do
 
   alias Zaq.Accounts
   alias Zaq.Engine.Conversations
+  alias Zaq.Engine.Telemetry.FeedbackReasons
   alias ZaqWeb.Helpers.DateFormat
 
   setup %{conn: conn} do
@@ -125,24 +126,58 @@ defmodule ZaqWeb.Live.BO.Communication.ConversationDetailLiveTest do
 
       assert has_element?(view, "#feedback-modal")
 
+      reason = hd(FeedbackReasons.list())
+
       view
-      |> element("button[phx-click='toggle_feedback_reason'][phx-value-reason='Not accurate']")
+      |> element("button[phx-click='toggle_feedback_reason'][phx-value-reason='#{reason}']")
       |> render_click()
 
       view
-      |> element("textarea[name='comment']")
-      |> render_change(%{"comment" => "Missing context"})
-
-      view
-      |> element("button[phx-click='submit_feedback']")
-      |> render_click()
+      |> form("#feedback-modal-form", %{"comment" => "Missing context"})
+      |> render_submit()
 
       refute has_element?(view, "#feedback-modal")
 
       rating = Conversations.get_rating(assistant_msg, %{user_id: user.id})
       assert rating.rating == 1
-      assert rating.comment =~ "Not accurate"
+      assert rating.comment =~ reason
       assert rating.comment =~ "Missing context"
+
+      html = render(view)
+      assert html =~ ~s(data-testid="rating-feedback-note")
+      assert html =~ "Reasons:"
+      assert html =~ reason
+      assert html =~ "Missing context"
+    end
+
+    test "submit_feedback captures textarea value even without phx-change", %{
+      conn: conn,
+      user: user
+    } do
+      {conv, assistant_msg} = create_conv_with_messages(user.id)
+      {:ok, view, _html} = live(conn, ~p"/bo/conversations/#{conv.id}")
+
+      view
+      |> element("button[phx-value-id='#{assistant_msg.id}'][phx-value-type='negative']")
+      |> render_click()
+
+      reason = hd(FeedbackReasons.list())
+
+      view
+      |> element("button[phx-click='toggle_feedback_reason'][phx-value-reason='#{reason}']")
+      |> render_click()
+
+      render_hook(view, "submit_feedback", %{
+        "comment" => "Submitted without change event"
+      })
+
+      rating = Conversations.get_rating(assistant_msg, %{user_id: user.id})
+      assert rating.rating == 1
+      assert rating.comment =~ reason
+      assert rating.comment =~ "Submitted without change event"
+
+      html = render(view)
+      assert html =~ "Submitted without change event"
     end
 
     test "closes negative feedback modal when cancel is clicked", %{conn: conn, user: user} do

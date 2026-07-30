@@ -22,6 +22,8 @@ defmodule ZaqWeb.Components.ChatMessage do
       >
         <:actions>..rating or feedback buttons..</:actions>
       </ChatMessage.assistant_bubble>
+
+      <ChatMessage.rating_feedback_note comment={saved_comment} />
   """
   use Phoenix.Component
   use ZaqWeb, :verified_routes
@@ -78,6 +80,8 @@ defmodule ZaqWeb.Components.ChatMessage do
   attr :error_type, :atom, default: nil
   attr :source_click_event, :string, default: nil
   attr :source_click_target, :string, default: nil
+  attr :saved_feedback_reasons, :string, default: nil
+  attr :saved_feedback_user_comment, :string, default: nil
 
   slot :actions
 
@@ -86,76 +90,49 @@ defmodule ZaqWeb.Components.ChatMessage do
       assigns
       |> assign(:rendered_content, assigns.content |> Markdown.render() |> Phoenix.HTML.raw())
       |> assign_error_parts()
+      |> assign(
+        :show_saved_feedback?,
+        feedback_note_visible?(%{
+          reasons: assigns.saved_feedback_reasons,
+          user_comment: assigns.saved_feedback_user_comment
+        })
+      )
 
     ~H"""
-    <div class="flex justify-start min-w-0 animate-slide-in-left" data-testid="chat-assistant-bubble">
-      <div class="flex min-w-0 max-w-[82%] gap-4">
-        <div class="shrink-0 mt-0.5">
-          <img
-            src={~p"/images/zaq.png"}
-            alt="ZAQ"
-            class="w-8 h-8 rounded-lg object-contain"
-          />
-        </div>
+    <div class="min-w-0 animate-slide-in-left" data-testid="chat-assistant-bubble">
+      <div class="flex justify-start min-w-0">
+        <div class="flex min-w-0 max-w-[82%] gap-4">
+          <div class="shrink-0 mt-0.5">
+            <img
+              src={~p"/images/zaq.png"}
+              alt="ZAQ"
+              class="w-8 h-8 rounded-lg object-contain"
+            />
+          </div>
 
-        <div class="flex-1 min-w-0">
-          <%= if @is_error && (@error_detail || @error_type != nil) do %>
-            <%= if @error_type == :budget_exceeded do %>
-              <p
-                class="zaq-text-body-sm leading-relaxed mb-2"
-                style="color: var(--zaq-text-color-body-danger);"
-              >
-                {@error_summary}
-              </p>
-              <div class="mt-1 mb-2">
-                <p class="zaq-text-body-sm mb-3" style="color: var(--zaq-text-color-body-success);">
-                  Top up your wallet to continue using ZAQ Router.
-                </p>
-                <a
-                  href={@portal_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  class="zaq-btn zaq-btn-primary zaq-btn-text_label-default inline-flex items-center gap-1.5"
+          <div class="flex-1 min-w-0">
+            <%= if @is_error && (@error_detail || @error_type != nil) do %>
+              <%= if @error_type == :budget_exceeded do %>
+                <p
+                  class="zaq-text-body-sm leading-relaxed mb-2"
+                  style="color: var(--zaq-text-color-body-danger);"
                 >
-                  Top up wallet
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
+                  {@error_summary}
+                </p>
+                <div class="mt-1 mb-2">
+                  <p class="zaq-text-body-sm mb-3" style="color: var(--zaq-text-color-body-success);">
+                    Top up your wallet to continue using ZAQ Router.
+                  </p>
+                  <a
+                    href={@portal_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="zaq-btn zaq-btn-primary zaq-btn-text_label-default inline-flex items-center gap-1.5"
                   >
-                    <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
-                    <polyline points="15 3 21 3 21 9" />
-                    <line x1="10" y1="14" x2="21" y2="3" />
-                  </svg>
-                </a>
-              </div>
-            <% else %>
-              <div
-                class="zaq-feedback-banner zaq-danger zaq-text-body-sm"
-                style="flex-direction: column; align-items: stretch;"
-              >
-                <p class="leading-relaxed mb-2" style="color: inherit;">{@error_summary}</p>
-                <div class="relative">
-                  <pre
-                    class="zaq-text-code leading-relaxed overflow-x-auto whitespace-pre-wrap break-all"
-                    style="color: inherit;"
-                  >{@error_detail}</pre>
-                  <button
-                    type="button"
-                    phx-click="copy_message"
-                    phx-value-text={@error_detail}
-                    class="zaq-chat-message__icon-btn absolute top-1.5 right-1.5"
-                    style="color: inherit;"
-                    title="Copy error detail"
-                  >
+                    Top up wallet
                     <svg
-                      width="11"
-                      height="11"
+                      width="12"
+                      height="12"
                       viewBox="0 0 24 24"
                       fill="none"
                       stroke="currentColor"
@@ -163,73 +140,114 @@ defmodule ZaqWeb.Components.ChatMessage do
                       stroke-linecap="round"
                       stroke-linejoin="round"
                     >
-                      <rect x="9" y="9" width="13" height="13" rx="2"></rect>
-                      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                      <polyline points="15 3 21 3 21 9" />
+                      <line x1="10" y1="14" x2="21" y2="3" />
                     </svg>
-                  </button>
+                  </a>
                 </div>
+              <% else %>
+                <div
+                  class="zaq-feedback-banner zaq-danger zaq-text-body-sm"
+                  style="flex-direction: column; align-items: stretch;"
+                >
+                  <p class="leading-relaxed mb-2" style="color: inherit;">{@error_summary}</p>
+                  <div class="relative">
+                    <pre
+                      class="zaq-text-code leading-relaxed overflow-x-auto whitespace-pre-wrap break-all"
+                      style="color: inherit;"
+                    >{@error_detail}</pre>
+                    <button
+                      type="button"
+                      phx-click="copy_message"
+                      phx-value-text={@error_detail}
+                      class="zaq-chat-message__icon-btn absolute top-1.5 right-1.5"
+                      style="color: inherit;"
+                      title="Copy error detail"
+                    >
+                      <svg
+                        width="11"
+                        height="11"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+                        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              <% end %>
+            <% else %>
+              <%!-- Body — markdown is rendered before display and patched immediately. --%>
+              <div
+                id={@msg_id && "msg-body-#{@msg_id}"}
+                class="zaq-text-body leading-relaxed [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
+                style={
+                  if(@is_error,
+                    do: "color: var(--zaq-text-color-body-danger);",
+                    else: "color: var(--zaq-text-color-body-default);"
+                  )
+                }
+              >
+                {@rendered_content}
               </div>
             <% end %>
-          <% else %>
-            <%!-- Body — markdown is rendered before display and patched immediately. --%>
+
+            <%!-- Source references (flat rows) --%>
             <div
-              id={@msg_id && "msg-body-#{@msg_id}"}
-              class="zaq-text-body leading-relaxed [&>p]:mb-2 [&>p:last-child]:mb-0 [&>ul]:list-disc [&>ul]:pl-4 [&>ol]:list-decimal [&>ol]:pl-4"
-              style={
-                if(@is_error,
-                  do: "color: var(--zaq-text-color-body-danger);",
-                  else: "color: var(--zaq-text-color-body-default);"
-                )
-              }
+              :if={@sources != []}
+              class="grid grid-cols-2 gap-1.5 mt-3 pt-2.5"
+              style="border-top: var(--zaq-border-thickness-default) solid var(--zaq-border-color-default);"
             >
-              {@rendered_content}
+              <.source_card
+                :for={source <- @sources}
+                source={source}
+                click_event={@source_click_event}
+                click_target={@source_click_target}
+              />
             </div>
-          <% end %>
 
-          <%!-- Source references (flat rows) --%>
-          <div
-            :if={@sources != []}
-            class="grid grid-cols-2 gap-1.5 mt-3 pt-2.5"
-            style="border-top: var(--zaq-border-thickness-default) solid var(--zaq-border-color-default);"
-          >
-            <.source_card
-              :for={source <- @sources}
-              source={source}
-              click_event={@source_click_event}
-              click_target={@source_click_target}
-            />
-          </div>
-
-          <%!-- Meta row: timestamp + confidence bar + actions --%>
-          <div class="flex items-center gap-2 mt-1.5 ml-0.5">
-            <span class="zaq-text-caption" style="color: var(--zaq-text-color-body-tertiary);">
-              {format_time(@timestamp)}
-            </span>
-
-            <%!-- Confidence bar --%>
-            <div
-              :if={@confidence && @confidence > 0}
-              class="flex items-center gap-1.5"
-              title={"#{trunc(Float.round(@confidence * 100, 0))}% confidence"}
-            >
-              <div
-                class="w-16 h-1.5 rounded-full overflow-hidden box-border"
-                style="background-color: var(--zaq-surface-color-raised); border: var(--zaq-border-thickness-default) solid var(--zaq-border-color-default);"
-              >
-                <div class="h-full rounded-full" style={confidence_bar_fill_style(@confidence)} />
-              </div>
+            <%!-- Meta row: timestamp + confidence bar + actions --%>
+            <div class="flex items-center gap-2 mt-1.5 ml-0.5">
               <span class="zaq-text-caption" style="color: var(--zaq-text-color-body-tertiary);">
-                {trunc(Float.round(@confidence * 100, 0))}%
+                {format_time(@timestamp)}
               </span>
-            </div>
 
-            <%!-- Actions slot (copy/feedback in chat, ratings in conversation detail) --%>
-            <div class="flex items-center gap-0.5">
-              {render_slot(@actions)}
+              <%!-- Confidence bar --%>
+              <div
+                :if={@confidence && @confidence > 0}
+                class="flex items-center gap-1.5"
+                title={"#{trunc(Float.round(@confidence * 100, 0))}% confidence"}
+              >
+                <div
+                  class="w-16 h-1.5 rounded-full overflow-hidden box-border"
+                  style="background-color: var(--zaq-surface-color-raised); border: var(--zaq-border-thickness-default) solid var(--zaq-border-color-default);"
+                >
+                  <div class="h-full rounded-full" style={confidence_bar_fill_style(@confidence)} />
+                </div>
+                <span class="zaq-text-caption" style="color: var(--zaq-text-color-body-tertiary);">
+                  {trunc(Float.round(@confidence * 100, 0))}%
+                </span>
+              </div>
+
+              <%!-- Actions slot (copy/feedback in chat, ratings in conversation detail) --%>
+              <div class="flex items-center gap-0.5">
+                {render_slot(@actions)}
+              </div>
             </div>
           </div>
         </div>
       </div>
+      <.rating_feedback_note
+        :if={@show_saved_feedback?}
+        reasons={@saved_feedback_reasons}
+        user_comment={@saved_feedback_user_comment}
+      />
     </div>
     """
   end
@@ -295,6 +313,34 @@ defmodule ZaqWeb.Components.ChatMessage do
         <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
       </svg>
     </button>
+    """
+  end
+
+  @doc """
+  Read-only note shown under an assistant bubble when a negative rating includes saved feedback.
+
+  Used on conversation history detail; not shown in the live chat transcript.
+  """
+  attr :reasons, :string, default: nil
+  attr :user_comment, :string, default: nil
+
+  def rating_feedback_note(assigns) do
+    assigns = assign(assigns, :visible?, feedback_note_visible?(assigns))
+
+    ~H"""
+    <div
+      :if={@visible?}
+      class="ml-10 -mt-2 zaq-feedback-banner zaq-warning"
+      style="flex-direction: column; align-items: stretch;"
+      data-testid="rating-feedback-note"
+    >
+      <p :if={@reasons} class="zaq-text-body-sm">
+        <span class="font-semibold">Reasons:</span> {@reasons}
+      </p>
+      <p :if={@user_comment} class="zaq-text-body-sm">
+        <span class="font-semibold">Feedback:</span> {@user_comment}
+      </p>
+    </div>
     """
   end
 
@@ -688,4 +734,11 @@ defmodule ZaqWeb.Components.ChatMessage do
 
     {:safe, html}
   end
+
+  defp feedback_note_visible?(%{reasons: reasons, user_comment: user_comment}) do
+    present_feedback_text?(reasons) or present_feedback_text?(user_comment)
+  end
+
+  defp present_feedback_text?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present_feedback_text?(_), do: false
 end

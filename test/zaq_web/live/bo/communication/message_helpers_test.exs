@@ -250,4 +250,39 @@ defmodule ZaqWeb.Live.BO.Communication.MessageHelpersTest do
       assert MessageHelpers.toggle_trace_details(expanded, "trace-1") == MapSet.new()
     end
   end
+
+  describe "rating_feedback_display/1" do
+    test "splits stored reasons and user free-text comment" do
+      assert MessageHelpers.rating_feedback_display([
+               %{comment: "Not factually correct\nMissing the probation section"}
+             ]) == %{
+               reasons: "Not factually correct",
+               user_comment: "Missing the probation section"
+             }
+    end
+
+    test "returns reasons only when no free-text comment was saved" do
+      assert MessageHelpers.rating_feedback_display([
+               %{comment: "Too slow, Outdated information"}
+             ]) == %{
+               reasons: "Too slow, Outdated information",
+               user_comment: nil
+             }
+    end
+
+    test "returns nil for blank or missing comments" do
+      assert MessageHelpers.rating_feedback_display([]) == nil
+      assert MessageHelpers.rating_feedback_display([%{comment: ""}]) == nil
+      assert MessageHelpers.rating_feedback_display([%{comment: "   "}]) == nil
+    end
+  end
+
+  describe "feedback_comment_from_submit/2" do
+    test "prefers comment from submit params over stale assign" do
+      assert MessageHelpers.feedback_comment_from_submit(
+               %{"comment" => "Typed at submit"},
+               "stale assign"
+             ) == "Typed at submit"
+    end
+  end
 end

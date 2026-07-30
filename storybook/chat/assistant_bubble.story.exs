@@ -134,6 +134,20 @@ defmodule Storybook.Chat.AssistantBubble do
           confidence: 0.42
         },
         slots: [actions_slot(nil, :negative)]
+      },
+      %Variation{
+        id: :with_saved_negative_feedback,
+        description: "Saved negative feedback note under assistant bubble",
+        attributes: %{
+          content:
+            "The refund policy allows returns within 30 days of purchase with a valid receipt.",
+          timestamp: ~N[2024-01-15 10:39:05],
+          confidence: 0.42,
+          saved_feedback_reasons: "Not factually correct, Missing information in knowledge base",
+          saved_feedback_user_comment:
+            "The answer skipped the probation-period section from the HR handbook."
+        },
+        slots: [actions_slot(nil, :negative)]
       }
     ]
   end

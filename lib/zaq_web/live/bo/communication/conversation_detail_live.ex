@@ -10,6 +10,7 @@ defmodule ZaqWeb.Live.BO.Communication.ConversationDetailLive do
   alias ZaqWeb.Live.BO.Communication.MessageHelpers
   alias ZaqWeb.Live.BO.PreviewHelpers
 
+  import ZaqWeb.Chat.Modals, only: [feedback_modal: 1]
   import ZaqWeb.Components.DesignSystem.Table, only: [table_badge: 1]
   import ZaqWeb.Helpers.DateFormat, only: [format_date: 1, inject_date_separators: 2]
 
@@ -91,10 +92,13 @@ defmodule ZaqWeb.Live.BO.Communication.ConversationDetailLive do
     {:noreply, assign(socket, :feedback_comment, comment)}
   end
 
-  def handle_event("submit_feedback", _params, socket) do
+  def handle_event("submit_feedback", params, socket) do
     id = socket.assigns.feedback_message_id
     reasons = socket.assigns.feedback_reasons
-    comment = socket.assigns.feedback_comment
+
+    comment =
+      MessageHelpers.feedback_comment_from_submit(params, socket.assigns.feedback_comment)
+
     current_user = socket.assigns[:current_user]
 
     msg = find_message(socket.assigns.messages, id)

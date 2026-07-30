@@ -13,6 +13,7 @@ defmodule ZaqWeb.Live.BO.Communication.MessageHelpers do
   """
 
   alias Zaq.Engine.Messages.Measurements
+  alias Zaq.Engine.Telemetry.FeedbackReasons
 
   def positive_rater_attrs(current_user) do
     if current_user,
@@ -119,6 +120,66 @@ defmodule ZaqWeb.Live.BO.Communication.MessageHelpers do
   def infer_feedback_from_ratings([%{rating: r} | _]) when r >= 4, do: :positive
   def infer_feedback_from_ratings([%{rating: r} | _]) when r <= 2, do: :negative
   def infer_feedback_from_ratings(_), do: nil
+
+  @doc """
+  Reads the optional free-text comment from a feedback submit event or socket assign.
+  """
+  def feedback_comment_from_submit(params, socket_comment) when is_map(params) do
+    case Map.get(params, "comment", socket_comment) do
+      comment when is_binary(comment) -> comment
+      _ -> socket_comment || ""
+    end
+  end
+
+  @doc """
+  Parses a saved negative rating into reason chips and the user's free-text comment.
+  """
+  def rating_feedback_display([]), do: nil
+
+  def rating_feedback_display([%{comment: comment} | _]) when is_binary(comment) do
+    comment = String.trim(comment)
+    if comment == "", do: nil, else: build_feedback_display(comment)
+  end
+
+  def rating_feedback_display(_), do: nil
+
+  defp build_feedback_display(comment) do
+    case String.split(comment, "\n", parts: 2) do
+      [reasons_line, user_line] ->
+        %{
+          reasons: normalize_reasons_line(reasons_line),
+          user_comment: blank_to_nil(String.trim(user_line))
+        }
+
+      [single_line] ->
+        trimmed = String.trim(single_line)
+
+        if reasons_only_line?(trimmed) do
+          %{reasons: trimmed, user_comment: nil}
+        else
+          %{reasons: nil, user_comment: trimmed}
+        end
+    end
+  end
+
+  defp normalize_reasons_line(line) do
+    trimmed = String.trim(line)
+    if trimmed == "", do: nil, else: trimmed
+  end
+
+  defp reasons_only_line?(line) do
+    line
+    |> String.split(",")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> case do
+      [] -> false
+      parts -> Enum.all?(parts, &(&1 in FeedbackReasons.list()))
+    end
+  end
+
+  defp blank_to_nil(""), do: nil
+  defp blank_to_nil(value), do: value
 
   def toggle_reason(reasons, reason) do
     if reason in reasons,

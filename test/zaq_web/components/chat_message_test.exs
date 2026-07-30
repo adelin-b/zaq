@@ -589,4 +589,47 @@ defmodule ZaqWeb.Components.ChatMessageTest do
       assert html =~ "https://portal.test"
     end
   end
+
+  describe "rating_feedback_note/1" do
+    test "renders saved reasons and user free-text comment" do
+      html =
+        render_component(&ChatMessage.rating_feedback_note/1,
+          reasons: "Not factually correct",
+          user_comment: "Missing the probation-period section"
+        )
+
+      assert html =~ ~s(data-testid="rating-feedback-note")
+      assert html =~ "zaq-feedback-banner"
+      assert html =~ "zaq-warning"
+      assert html =~ "Reasons:"
+      assert html =~ "Not factually correct"
+      assert html =~ "Feedback:"
+      assert html =~ "Missing the probation-period section"
+    end
+
+    test "renders nothing when both reason and user comment are blank" do
+      html =
+        render_component(&ChatMessage.rating_feedback_note/1, reasons: "   ", user_comment: "   ")
+
+      refute html =~ ~s(data-testid="rating-feedback-note")
+    end
+  end
+
+  describe "assistant_bubble saved feedback variation" do
+    test "renders embedded negative feedback note under the bubble" do
+      html =
+        render_component(&ChatMessage.assistant_bubble/1,
+          content: "Answer with saved feedback.",
+          timestamp: ~N[2026-04-15 09:45:00],
+          confidence: 0.42,
+          saved_feedback_reasons: "Too slow",
+          saved_feedback_user_comment: "Needs more detail about onboarding."
+        )
+
+      assert html =~ ~s(data-testid="chat-assistant-bubble")
+      assert html =~ ~s(data-testid="rating-feedback-note")
+      assert html =~ "Too slow"
+      assert html =~ "Needs more detail about onboarding."
+    end
+  end
 end

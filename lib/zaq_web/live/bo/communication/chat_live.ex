@@ -399,10 +399,13 @@ defmodule ZaqWeb.Live.BO.Communication.ChatLive do
     {:noreply, assign(socket, :feedback_comment, comment)}
   end
 
-  def handle_event("submit_feedback", _params, socket) do
+  def handle_event("submit_feedback", params, socket) do
     id = socket.assigns.feedback_message_id
     reasons = socket.assigns.feedback_reasons
-    comment = socket.assigns.feedback_comment
+
+    comment =
+      MessageHelpers.feedback_comment_from_submit(params, socket.assigns.feedback_comment)
+
     current_user = socket.assigns[:current_user]
 
     msg = Enum.find(socket.assigns.messages, &(Map.get(&1, :id) == id))

@@ -678,7 +678,7 @@ defmodule ZaqWeb.Live.BO.Communication.ChatLiveTest do
     render_hook(view, "feedback", %{"id" => bot_ui_id.id, "type" => "negative"})
     render_hook(view, "toggle_feedback_reason", %{"reason" => "Too slow"})
     render_hook(view, "update_feedback_comment", %{"comment" => "Needs more detail"})
-    render_hook(view, "submit_feedback", %{})
+    render_hook(view, "submit_feedback", %{"comment" => "Needs more detail"})
 
     assert_eventually(fn ->
       msgs = Conversations.list_messages(Conversations.get_conversation!(conv.id))
@@ -809,7 +809,7 @@ defmodule ZaqWeb.Live.BO.Communication.ChatLiveTest do
     render_hook(view, "update_feedback_comment", %{"comment" => "details"})
     assert render(view) =~ "details"
 
-    render_hook(view, "submit_feedback", %{})
+    render_hook(view, "submit_feedback", %{"comment" => "Needs more detail"})
     refute has_element?(view, "#feedback-modal")
 
     assert has_element?(
