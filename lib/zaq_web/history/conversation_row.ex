@@ -94,8 +94,8 @@ defmodule ZaqWeb.History.ConversationRow do
         <.table_datetime value={@conversation.updated_at} />
       </.table_cell>
 
-      <.table_cell align={:right} nowrap>
-        <.table_actions>
+      <.table_cell align={:right} width="w-24" nowrap>
+        <.table_actions reveal={:hover}>
           <DSButton.button
             :if={@live_action != :archived}
             variant={:tertiary}
@@ -107,12 +107,14 @@ defmodule ZaqWeb.History.ConversationRow do
           <DSButton.button
             variant={:tertiary}
             danger
+            icon="hero-trash"
+            icon_only
+            aria-label="Delete conversation"
+            title="Delete"
             phx-click="delete_conversation"
             phx-value-id={@conversation.id}
             data-confirm="Delete this conversation? This cannot be undone."
-          >
-            Delete
-          </DSButton.button>
+          />
         </.table_actions>
       </.table_cell>
     </.table_row>
