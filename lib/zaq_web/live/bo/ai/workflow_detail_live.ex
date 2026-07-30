@@ -13,6 +13,7 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
   alias Zaq.Event
 
   alias ZaqWeb.Components.{BOLayout, BOModal}
+  alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
 
   @per_page_options [20, 50, 100]
 
@@ -303,53 +304,39 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
               {@workflow.description}
             </p>
           </div>
-          <%!-- Actions: primary | separator | destructive --%>
           <div class="flex items-center gap-2 flex-shrink-0">
-            <button
-              phx-click="open_edit"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-black/15 text-black/60 hover:bg-black/5 transition-colors"
-            >
-              Edit
-            </button>
-            <button
+            <DSButton.button
+              variant={:primary}
+              icon="hero-play"
               phx-click="run_workflow"
               phx-value-workflow_id={@workflow.id}
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-[#03b6d4] text-[#03b6d4] hover:bg-[#03b6d4]/10 transition-colors"
+              title="Run workflow manually"
             >
-              Run Now
-            </button>
-            <button
-              phx-click="export"
-              class="font-mono text-[0.82rem] font-bold px-5 py-2 rounded-lg bg-[#03b6d4] text-white hover:bg-[#029ab3] transition-all"
-            >
-              Export Workflow
-            </button>
-            <div class="w-px h-6 bg-black/10 mx-1" />
-            <button
-              phx-click="toggle_status"
-              class={[
-                "font-mono text-[0.82rem] px-4 py-2 rounded-lg border transition-colors",
-                case @workflow.status do
-                  "draft" -> "border-green-200 text-green-700 hover:bg-green-50"
-                  "active" -> "border-amber-200 text-amber-600 hover:bg-amber-50"
-                  "archived" -> "border-green-200 text-green-700 hover:bg-green-50"
-                  _ -> "border-black/10 text-black/40"
-                end
-              ]}
-            >
-              {case @workflow.status do
-                "draft" -> "Activate"
-                "active" -> "Archive"
-                "archived" -> "Restore"
-                _ -> ""
-              end}
-            </button>
-            <button
+              Run
+            </DSButton.button>
+            <DSButton.button variant={:secondary} phx-click="export">
+              Export
+            </DSButton.button>
+            <DSButton.button variant={:secondary} phx-click="toggle_status">
+              {toggle_status_label(@workflow.status)}
+            </DSButton.button>
+            <DSButton.button
+              variant={:secondary}
+              icon="hero-pencil-square"
+              icon_only
+              aria-label="Edit workflow"
+              title="Edit"
+              phx-click="open_edit"
+            />
+            <DSButton.button
+              variant={:tertiary}
+              danger
+              icon="hero-trash"
+              icon_only
+              aria-label="Delete workflow"
+              title="Delete"
               phx-click="open_delete"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 transition-colors"
-            >
-              Delete
-            </button>
+            />
           </div>
         </div>
 
@@ -707,6 +694,11 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
   rescue
     _ -> %{}
   end
+
+  defp toggle_status_label("draft"), do: "Activate"
+  defp toggle_status_label("active"), do: "Archive"
+  defp toggle_status_label("archived"), do: "Restore"
+  defp toggle_status_label(_), do: ""
 
   defp node_router, do: Application.get_env(:zaq, :node_router, Zaq.NodeRouter)
 

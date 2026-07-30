@@ -358,21 +358,21 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLiveTest do
   end
 
   describe "toggle_status event" do
-    test "active workflow renders Archive button with amber border", %{conn: conn} do
+    test "active workflow renders Archive button", %{conn: conn} do
       workflow = workflow_fixture(%{status: "active"})
       {:ok, _view, html} = live(conn, ~p"/bo/workflows/#{workflow.id}")
       assert html =~ "Archive"
-      assert html =~ "border-amber-200"
+      assert html =~ "zaq-btn-secondary"
     end
 
-    test "archived workflow renders Restore button with green border", %{conn: conn} do
+    test "archived workflow renders Restore button", %{conn: conn} do
       workflow = workflow_fixture(%{status: "archived"})
       {:ok, _view, html} = live(conn, ~p"/bo/workflows/#{workflow.id}")
       assert html =~ "Restore"
-      assert html =~ "border-green-200"
+      assert html =~ "zaq-btn-secondary"
     end
 
-    test "unknown status renders fallback border and empty label", %{conn: conn} do
+    test "unknown status renders empty toggle label", %{conn: conn} do
       workflow = workflow_fixture()
 
       import Ecto.Query
@@ -383,7 +383,10 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLiveTest do
       )
 
       {:ok, _view, html} = live(conn, ~p"/bo/workflows/#{workflow.id}")
-      assert html =~ "border-black/10"
+      assert html =~ ~s(phx-click="toggle_status")
+      refute html =~ ">Activate<"
+      refute html =~ ">Archive<"
+      refute html =~ ">Restore<"
     end
 
     test "draft → click toggle → becomes active (shows Archive)", %{conn: conn} do
