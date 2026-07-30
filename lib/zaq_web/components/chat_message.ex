@@ -240,14 +240,15 @@ defmodule ZaqWeb.Components.ChatMessage do
                 {render_slot(@actions)}
               </div>
             </div>
+
+            <.rating_feedback_note
+              :if={@show_saved_feedback?}
+              reasons={@saved_feedback_reasons}
+              user_comment={@saved_feedback_user_comment}
+            />
           </div>
         </div>
       </div>
-      <.rating_feedback_note
-        :if={@show_saved_feedback?}
-        reasons={@saved_feedback_reasons}
-        user_comment={@saved_feedback_user_comment}
-      />
     </div>
     """
   end
@@ -330,8 +331,7 @@ defmodule ZaqWeb.Components.ChatMessage do
     ~H"""
     <div
       :if={@visible?}
-      class="ml-10 -mt-2 zaq-feedback-banner zaq-warning"
-      style="flex-direction: column; align-items: stretch;"
+      class="zaq-feedback-banner zaq-warning zaq-chat-rating-feedback-note"
       data-testid="rating-feedback-note"
     >
       <p :if={@reasons} class="zaq-text-body-sm">

@@ -931,6 +931,13 @@ html[data-theme="dark"] .zaq-toggle-group-pill > button:nth-of-type(3) {
   background-color: var(--zaq-surface-color-elevated);
 }
 
+/* Saved negative feedback note under assistant message meta row */
+.zaq-chat-rating-feedback-note {
+  flex-direction: column;
+  align-items: stretch;
+  margin-top: var(--zaq-scale-4);
+}
+
 /* User-authored chat bubble: elevated surface, square bottom-right (speech tail) */
 .zaq-chat-user-bubble {
   box-sizing: border-box;
