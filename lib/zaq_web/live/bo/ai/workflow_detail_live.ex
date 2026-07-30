@@ -13,11 +13,13 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
   alias Zaq.Event
 
   alias ZaqWeb.Components.{BOLayout, BOModal}
+  alias ZaqWeb.Components.DesignSystem.Breadcrumb, as: DSBreadcrumb
   alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
   alias ZaqWeb.Components.DesignSystem.Table, as: DSTable
 
   import DSTable,
     only: [
+      table_actions: 1,
       table_badge: 1,
       table_cell: 1,
       table_datetime: 1,
@@ -291,14 +293,10 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
       features_version={@features_version}
     >
       <div id="workflow-detail" phx-hook="WorkflowExport">
-        <%!-- Breadcrumb --%>
-        <nav class="font-mono text-[0.75rem] text-black mb-5 flex items-center gap-1.5">
-          <.link navigate={~p"/bo/workflows"} class="text-black/50 hover:text-black transition-colors">
-            Workflows
-          </.link>
-          <span class="text-black/30">/</span>
-          <span class="text-black font-semibold">{@workflow.name}</span>
-        </nav>
+        <DSBreadcrumb.page_breadcrumb items={[
+          %{label: "Workflows", to: ~p"/bo/workflows"},
+          %{label: @workflow.name, current: true}
+        ]} />
 
         <%!-- Page header --%>
         <div class="flex items-start justify-between mb-6">
@@ -486,10 +484,11 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
                 <.table_cell element={:th}>
                   <.table_text label="Duration" tone={:tertiary} />
                 </.table_cell>
+                <.table_cell element={:th} align={:right} width="w-24" />
               </.table_head_row>
             </:head>
             <:body>
-              <.table_empty :if={@runs == []} colspan={3}>
+              <.table_empty :if={@runs == []} colspan={4}>
                 No runs yet.
               </.table_empty>
               <.table_row
@@ -505,6 +504,16 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
                 </.table_cell>
                 <.table_cell>
                   <.run_duration run={run} />
+                </.table_cell>
+                <.table_cell align={:right} width="w-24" nowrap>
+                  <.table_actions reveal={:hover}>
+                    <DSButton.button
+                      variant={:secondary}
+                      navigate={~p"/bo/workflows/#{@workflow.id}/runs/#{run.id}"}
+                    >
+                      View
+                    </DSButton.button>
+                  </.table_actions>
                 </.table_cell>
               </.table_row>
             </:body>

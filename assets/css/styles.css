@@ -526,6 +526,11 @@ a.zaq-link:focus-visible .zaq-link-underline {
   color: var(--zaq-text-color-body-accent);
 }
 
+.zaq-breadcrumb-current {
+  font-weight: var(--zaq-font-weight-semibold);
+  color: var(--zaq-text-color-body-primary);
+}
+
 /* ── Toggle — segmented control (`ZaqWeb.Components.DesignSystem.Toggle`)
       Pill shell + segment buttons (e.g. list/grid). Generic BO pattern — reuse anywhere. ─ */
 

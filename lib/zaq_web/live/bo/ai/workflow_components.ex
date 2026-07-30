@@ -41,7 +41,10 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowComponents do
 
   def run_duration(assigns) do
     ~H"""
-    <span class="font-mono text-[0.75rem] text-black/60">
+    <span
+      class="font-mono zaq-text-body-sm tabular-nums whitespace-nowrap"
+      style="color: var(--zaq-text-color-body-tertiary)"
+    >
       {format_duration(@run, @now)}
     </span>
     """

@@ -1,12 +1,17 @@
 defmodule ZaqWeb.Components.DesignSystem.Breadcrumb do
   @moduledoc """
-  Path breadcrumbs and back control for the BO ingestion file browser.
+  BO breadcrumb components — ingestion file browser and page hierarchy navigation.
+
+  - `breadcrumb/1` — in-page folder trail with back control (ingestion file browser).
+  - `page_breadcrumb/1` — route-based hierarchy via LiveView `navigate` links.
 
   **Styles:** universal block in `assets/css/styles.css` — `.zaq-breadcrumb-*`,
   plus shared `.zaq-icon-sm` and `.zaq-link-underline` (not under the ingestion-only section).
   """
 
   use Phoenix.Component
+
+  alias ZaqWeb.Components.DesignSystem.Link, as: DSLink
 
   attr :breadcrumbs, :list, required: true
   attr :current_dir, :string, required: true
@@ -53,6 +58,54 @@ defmodule ZaqWeb.Components.DesignSystem.Breadcrumb do
         </button>
       </span>
     </div>
+    """
+  end
+
+  attr :items, :list,
+    required: true,
+    doc:
+      "Trail items — `%{label:, to:}` for links, `%{label:, current: true}` for the terminal crumb."
+
+  attr :id, :string, default: nil
+
+  def page_breadcrumb(assigns) do
+    ~H"""
+    <nav
+      :if={@items != []}
+      id={@id}
+      class="zaq-breadcrumb-row zaq-text-body-sm"
+      aria-label="Breadcrumb"
+    >
+      <%= for {item, index} <- Enum.with_index(@items) do %>
+        <.page_breadcrumb_item :if={index == 0} item={item} />
+        <span :if={index > 0} class="zaq-breadcrumb-trail">
+          <span class="zaq-breadcrumb-sep">/</span>
+          <.page_breadcrumb_item item={item} />
+        </span>
+      <% end %>
+    </nav>
+    """
+  end
+
+  attr :item, :map, required: true
+
+  defp page_breadcrumb_item(%{item: %{current: true}} = assigns) do
+    ~H"""
+    <span class="zaq-breadcrumb-current">{@item.label}</span>
+    """
+  end
+
+  defp page_breadcrumb_item(%{item: %{to: to}} = assigns) when is_binary(to) do
+    ~H"""
+    <DSLink.nav_link destination={@item.to} size={:sm} tone={:accent}>
+      {@item.label}
+    </DSLink.nav_link>
+    """
+  end
+
+  defp page_breadcrumb_item(assigns) do
+    ~H"""
+    <span class="zaq-breadcrumb-current">{@item.label}</span>
     """
   end
 

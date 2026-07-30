@@ -17,6 +17,7 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
 
   alias Zaq.{Event, NodeRouter}
   alias ZaqWeb.Components.BOLayout
+  alias ZaqWeb.Components.DesignSystem.Breadcrumb, as: DSBreadcrumb
   alias ZaqWeb.Live.BO.AI.WorkflowResultHelpers
   alias ZaqWeb.Live.BO.Communication.MessageHelpers
 
@@ -328,21 +329,11 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
       features_version={@features_version}
     >
       <div>
-        <%!-- Breadcrumb --%>
-        <nav class="font-mono text-[0.75rem] text-black mb-5 flex items-center gap-1.5">
-          <.link navigate={~p"/bo/workflows"} class="text-black/50 hover:text-black transition-colors">
-            Workflows
-          </.link>
-          <span class="text-black/30">/</span>
-          <.link
-            navigate={~p"/bo/workflows/#{@workflow.id}"}
-            class="text-black/50 hover:text-black transition-colors"
-          >
-            {@workflow.name}
-          </.link>
-          <span class="text-black/30">/</span>
-          <span class="text-black font-semibold">Run {short_id(@run.id)}</span>
-        </nav>
+        <DSBreadcrumb.page_breadcrumb items={[
+          %{label: "Workflows", to: ~p"/bo/workflows"},
+          %{label: @workflow.name, to: ~p"/bo/workflows/#{@workflow.id}"},
+          %{label: "Run #{short_id(@run.id)}", current: true}
+        ]} />
 
         <%!-- Run header --%>
         <div class="flex items-start justify-between mb-6">
