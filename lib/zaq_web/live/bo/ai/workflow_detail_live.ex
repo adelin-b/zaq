@@ -14,6 +14,18 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
 
   alias ZaqWeb.Components.{BOLayout, BOModal}
   alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
+  alias ZaqWeb.Components.DesignSystem.Table, as: DSTable
+
+  import DSTable,
+    only: [
+      table_badge: 1,
+      table_cell: 1,
+      table_datetime: 1,
+      table_empty: 1,
+      table_head_row: 1,
+      table_row: 1,
+      table_text: 1
+    ]
 
   @per_page_options [20, 50, 100]
 
@@ -462,56 +474,41 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
             </div>
           </div>
 
-          <div class="bg-white rounded-xl border border-black/[0.08] overflow-hidden">
-            <table class="w-full">
-              <thead>
-                <tr class="border-b border-black/[0.06] bg-black/[0.02]">
-                  <th class="font-mono text-[0.7rem] font-semibold text-black/50 uppercase tracking-wider text-left px-5 py-3">
-                    Status
-                  </th>
-                  <th class="font-mono text-[0.7rem] font-semibold text-black/50 uppercase tracking-wider text-left px-5 py-3">
-                    Started
-                  </th>
-                  <th class="font-mono text-[0.7rem] font-semibold text-black/50 uppercase tracking-wider text-left px-5 py-3">
-                    Duration
-                  </th>
-                  <th class="px-5 py-3"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  :for={run <- @runs}
-                  class="border-b border-black/[0.04] hover:bg-black/[0.01] transition-colors"
-                >
-                  <td class="px-5 py-3">
-                    <.run_status_badge status={run.status} />
-                  </td>
-                  <td class="px-5 py-3 font-mono text-[0.82rem] text-black">
-                    {format_datetime_seconds(run.started_at)}
-                  </td>
-                  <td class="px-5 py-3">
-                    <.run_duration run={run} />
-                  </td>
-                  <td class="px-5 py-3 text-right">
-                    <.link
-                      navigate={~p"/bo/workflows/#{@workflow.id}/runs/#{run.id}"}
-                      class="font-mono text-[0.75rem] text-black/40 hover:text-black transition-colors"
-                    >
-                      View →
-                    </.link>
-                  </td>
-                </tr>
-                <tr :if={@runs == []}>
-                  <td
-                    colspan="4"
-                    class="px-5 py-10 text-center font-mono text-[0.85rem] text-black/40"
-                  >
-                    No runs yet.
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
+          <DSTable.table id="workflow-runs-table">
+            <:head>
+              <.table_head_row>
+                <.table_cell element={:th}>
+                  <.table_text label="Status" tone={:tertiary} />
+                </.table_cell>
+                <.table_cell element={:th}>
+                  <.table_text label="Started" tone={:tertiary} />
+                </.table_cell>
+                <.table_cell element={:th}>
+                  <.table_text label="Duration" tone={:tertiary} />
+                </.table_cell>
+              </.table_head_row>
+            </:head>
+            <:body>
+              <.table_empty :if={@runs == []} colspan={3}>
+                No runs yet.
+              </.table_empty>
+              <.table_row
+                :for={run <- @runs}
+                id={"workflow-run-row-#{run.id}"}
+                navigate={~p"/bo/workflows/#{@workflow.id}/runs/#{run.id}"}
+              >
+                <.table_cell>
+                  <.table_badge status={run.status} pulse={run.status == "running"} />
+                </.table_cell>
+                <.table_cell>
+                  <.table_datetime value={run.started_at} />
+                </.table_cell>
+                <.table_cell>
+                  <.run_duration run={run} />
+                </.table_cell>
+              </.table_row>
+            </:body>
+          </DSTable.table>
 
           <%!-- Pagination --%>
           <div
