@@ -5,6 +5,57 @@ defmodule ZaqWeb.Components.BOLayoutTest do
 
   alias ZaqWeb.Components.BOLayout
 
+  test "bo_layout/1 renders page subtitle and tag slot in header" do
+    html =
+      render_component(&BOLayout.bo_layout/1,
+        current_user: %{
+          username: "alice",
+          role: %{name: "admin"},
+          portal_consent: nil,
+          email: nil
+        },
+        page_title: "Workflows",
+        page_subtitle: "Automated multi-step processes.",
+        current_path: "/bo/workflows",
+        page_tag: [%{inner_block: fn _, _ -> "active" end}],
+        inner_block: [%{inner_block: fn _, _ -> "Inner Content" end}]
+      )
+
+    assert html =~ "id=\"bo-page-heading\""
+    assert html =~ "id=\"bo-page-title\""
+    assert html =~ "id=\"bo-page-subtitle\""
+    assert html =~ "id=\"bo-page-tag\""
+    assert html =~ "Workflows"
+    assert html =~ "Automated multi-step processes."
+    assert html =~ "active"
+    assert html =~ "data-testid=\"bo-main-page-heading\""
+    assert html =~ "zaq-text-body"
+    refute html =~ "zaq-text-body-lg"
+  end
+
+  test "bo_layout/1 renders page icon from provider id" do
+    html =
+      render_component(&BOLayout.bo_layout/1,
+        current_user: %{
+          username: "alice",
+          role: %{name: "admin"},
+          portal_consent: nil,
+          email: nil
+        },
+        page_title: "Mattermost",
+        page_subtitle: "Self-hosted messaging with full control.",
+        page_icon_provider: "mattermost",
+        page_icon_accent: "#0058CC",
+        current_path: "/bo/channels/retrieval/mattermost",
+        inner_block: [%{inner_block: fn _, _ -> "Inner Content" end}]
+      )
+
+    assert html =~ "id=\"bo-page-icon\""
+    assert html =~ "max-w-2xl"
+    assert html =~ "w-10 h-10"
+    assert html =~ "background-color: #0058CC14"
+  end
+
   test "bo_layout/1 renders sidebar, header, and content" do
     html =
       render_component(&BOLayout.bo_layout/1,

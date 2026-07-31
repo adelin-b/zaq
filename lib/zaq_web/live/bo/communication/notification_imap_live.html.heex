@@ -10,9 +10,21 @@
     current_user={@current_user}
     flash={@flash}
     page_title={@page_title}
+    page_subtitle="Configure inbound email reception and mailbox listeners."
+    page_icon_provider="email"
+    page_icon_accent={ZaqWeb.Live.BO.Communication.ChannelsIndexLive.provider_accent("email")}
     current_path={@current_path}
     features_version={@features_version}
   >
+    <:page_tag>
+      <span class={
+        ZaqWeb.Components.DesignSystem.StatusPill.status_pill_classes(
+          if(@imap_enabled, do: "active", else: "archived")
+        )
+      }>
+        {if @imap_enabled, do: "Active", else: "Inactive"}
+      </span>
+    </:page_tag>
     <div class="mb-6">
       <div class="flex items-center gap-1.5 font-mono text-[0.7rem] text-black/40 mb-4">
         <.link navigate={~p"/bo/channels"} class="hover:text-black transition-colors">
@@ -33,39 +45,21 @@
         <span class="text-black">IMAP</span>
       </div>
 
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="font-mono text-xl font-bold text-black tracking-tight">{@page_title}</h1>
-          <p class="font-mono text-[0.75rem] text-black/40 mt-1">
-            Configure inbound email reception and mailbox listeners.
-          </p>
-        </div>
-
-        <div class="flex items-center gap-3">
-          <span class={[
-            "font-mono text-[0.72rem] px-2.5 py-1 rounded-full uppercase tracking-wider",
+      <div class="flex items-center justify-end">
+        <button
+          type="button"
+          phx-click="activate"
+          class={[
+            "font-mono text-[0.82rem] font-bold px-5 py-2.5 rounded-xl transition-all shadow-sm",
             if(@imap_enabled,
-              do: "bg-emerald-100 text-emerald-700",
-              else: "bg-black/5 text-black/40"
+              do:
+                "bg-white border border-black/10 text-black/60 hover:border-red-300 hover:text-red-600",
+              else: "bg-[#0284c7] text-white hover:bg-[#0369a1] shadow-[#0284c7]/20"
             )
-          ]}>
-            {if @imap_enabled, do: "Active", else: "Inactive"}
-          </span>
-          <button
-            type="button"
-            phx-click="activate"
-            class={[
-              "font-mono text-[0.82rem] font-bold px-5 py-2.5 rounded-xl transition-all shadow-sm",
-              if(@imap_enabled,
-                do:
-                  "bg-white border border-black/10 text-black/60 hover:border-red-300 hover:text-red-600",
-                else: "bg-[#0284c7] text-white hover:bg-[#0369a1] shadow-[#0284c7]/20"
-              )
-            ]}
-          >
-            {if @imap_enabled, do: "Deactivate", else: "Activate"}
-          </button>
-        </div>
+          ]}
+        >
+          {if @imap_enabled, do: "Deactivate", else: "Activate"}
+        </button>
       </div>
     </div>
 

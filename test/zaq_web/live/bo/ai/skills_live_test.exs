@@ -908,9 +908,9 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
       view |> element("#new-skill-button") |> render_click()
 
       # Defence in depth: the button is disabled, but the event must also refuse.
-      assert render_click(view, "open_resource_upload", %{}) =~ "Agent Skills"
+      assert render_click(view, "open_resource_upload", %{}) =~ "Skills"
       refute has_element?(view, "#skill-resource-modal")
-      assert render_submit(view, "upload_skill_resource", %{}) =~ "Agent Skills"
+      assert render_submit(view, "upload_skill_resource", %{}) =~ "Skills"
     end
 
     test "no resources panel when no skill is selected", %{conn: conn} do
@@ -926,7 +926,8 @@ defmodule ZaqWeb.Live.BO.AI.SkillsLiveTest do
   test "renders skills page with empty state", %{conn: conn} do
     {:ok, view, html} = live(conn, ~p"/bo/skills")
 
-    assert html =~ "Agent Skills"
+    assert html =~ "Skills"
+    assert html =~ "Reusable instruction + tool bundles attachable to any agent"
     assert html =~ "No skills found."
     assert has_element?(view, "#new-skill-button")
     refute has_element?(view, "#skill-form-drawer")

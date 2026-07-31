@@ -11,10 +11,25 @@ defmodule ZaqWeb.Components.BOLayout do
 
   alias Zaq.Addons.FeatureStore
   alias Zaq.System
+  alias ZaqWeb.Components.ChannelIcons
   use ZaqWeb, :verified_routes
 
   attr :current_user, :map, required: true
   attr :page_title, :string, default: "Dashboard"
+
+  attr :page_subtitle, :string,
+    default: nil,
+    doc: "Optional subtitle shown under the page title in the fixed header."
+
+  attr :page_icon_provider, :string,
+    default: nil,
+    doc: "Optional channel provider id rendered via ChannelIcons in the fixed header."
+
+  attr :page_icon_accent, :string,
+    default: nil,
+    doc:
+      "Optional hex accent for the page icon background (typically from channel card definitions)."
+
   attr :current_path, :string, default: ""
   attr :flash, :map, default: %{}
   attr :auto_dismiss, :boolean, default: true
@@ -28,6 +43,12 @@ defmodule ZaqWeb.Components.BOLayout do
       "When false, skips embedding `PortalConsentLive` (use in Storybook or other static previews where LiveComponents cannot mount)."
 
   slot :inner_block, required: true
+
+  slot :page_tag, doc: "Optional status tag rendered beside the page title."
+
+  slot :page_icon, doc: "Optional custom page icon; takes precedence over page_icon_provider."
+
+  slot :subtitle, doc: "Optional custom subtitle content; takes precedence over page_subtitle."
 
   def bo_layout(assigns) do
     app_version =
@@ -46,12 +67,17 @@ defmodule ZaqWeb.Components.BOLayout do
         _ -> load_update_badge_enabled()
       end
 
+    header_subtitle? =
+      (is_binary(assigns.page_subtitle) and assigns.page_subtitle != "") or
+        assigns.subtitle != [] or assigns.page_tag != []
+
     assigns =
       assigns
       |> assign(:app_version, app_version)
       |> assign(:update_badge_enabled, update_badge_enabled)
       |> assign(:nav_sections, nav_sections)
       |> assign(:nav_section_ids, Enum.map(nav_sections, & &1.id))
+      |> assign(:header_subtitle?, header_subtitle?)
 
     ~H"""
     <div class="min-h-screen flex" style="background: var(--zaq-surface-color-base);" id="bo-root">
@@ -370,9 +396,59 @@ defmodule ZaqWeb.Components.BOLayout do
           class="h-16 border-b flex items-center px-8 gap-6"
           style="background: var(--zaq-surface-color-raised); border-color: var(--zaq-border-color-default);"
         >
-          <h1 class="zaq-text-body-lg shrink-0" style="color: var(--zaq-text-color-body-default);">
-            {@page_title}
-          </h1>
+          <div class="flex items-center gap-3 min-w-0 max-w-2xl shrink-0">
+            <%= cond do %>
+              <% @page_icon != [] -> %>
+                <span id="bo-page-icon" class="shrink-0 flex items-center">
+                  {render_slot(@page_icon)}
+                </span>
+              <% is_binary(@page_icon_provider) and @page_icon_provider != "" -> %>
+                <div
+                  id="bo-page-icon"
+                  class="w-10 h-10 rounded-lg grid place-items-center shrink-0"
+                  style={page_icon_style(@page_icon_accent)}
+                >
+                  <ChannelIcons.icon provider={@page_icon_provider} class="w-6 h-6" />
+                </div>
+              <% true -> %>
+            <% end %>
+            <div id="bo-page-heading" class="min-w-0 flex-1">
+              <div class="flex items-center gap-2 min-w-0">
+                <h1
+                  id="bo-page-title"
+                  data-testid="bo-main-page-heading"
+                  class={[
+                    "truncate",
+                    if(@header_subtitle?, do: "zaq-text-body", else: "zaq-text-body-lg")
+                  ]}
+                  style="color: var(--zaq-text-color-body-default);"
+                >
+                  {@page_title}
+                </h1>
+                <span :if={@page_tag != []} id="bo-page-tag" class="shrink-0 flex items-center">
+                  {render_slot(@page_tag)}
+                </span>
+              </div>
+              <%= if @subtitle != [] do %>
+                <div
+                  id="bo-page-subtitle"
+                  class="zaq-text-body-sm truncate mt-0.5"
+                  style="color: var(--zaq-text-color-body-tertiary);"
+                >
+                  {render_slot(@subtitle)}
+                </div>
+              <% else %>
+                <p
+                  :if={@page_subtitle}
+                  id="bo-page-subtitle"
+                  class="zaq-text-body-sm truncate mt-0.5"
+                  style="color: var(--zaq-text-color-body-tertiary);"
+                >
+                  {@page_subtitle}
+                </p>
+              <% end %>
+            </div>
+          </div>
 
           <div class="flex-1 min-w-0">
             <.live_component
@@ -1042,5 +1118,13 @@ defmodule ZaqWeb.Components.BOLayout do
     DBConnection.ConnectionError -> false
   catch
     :exit, _reason -> false
+  end
+
+  defp page_icon_style(accent) when is_binary(accent) and accent != "" do
+    "background-color: #{accent}14; border: 1px solid #{accent}33;"
+  end
+
+  defp page_icon_style(_accent) do
+    "background: var(--zaq-surface-color-base); border: 1px solid var(--zaq-border-color-default);"
   end
 end

@@ -2,9 +2,19 @@
   current_user={@current_user}
   flash={@flash}
   page_title={@provider_label}
+  page_subtitle={ZaqWeb.Live.BO.Communication.ChannelsIndexLive.provider_description(@provider)}
+  page_icon_provider={@provider}
+  page_icon_accent={ZaqWeb.Live.BO.Communication.ChannelsIndexLive.provider_accent(@provider)}
   current_path={@current_path}
   features_version={@features_version}
 >
+  <:page_tag>
+    <ZaqWeb.Components.ChannelCapabilities.icon_with_modal
+      modal_open?={@capability_modal_open}
+      snapshot={@capabilities_snapshot}
+      title={"#{@provider_label} capabilities"}
+    />
+  </:page_tag>
   <div id="oauth-popup-listener" phx-hook="OAuthPopupListener"></div>
   <div class="mb-6">
     <.link
@@ -16,22 +26,7 @@
       </svg>
       Data Sources
     </.link>
-    <div class="flex items-center justify-between gap-3">
-      <div>
-        <div class="flex items-center gap-2">
-          <h1 class="font-mono text-lg font-bold text-black" data-testid="bo-main-page-heading">
-            {@provider_label}
-          </h1>
-          <ZaqWeb.Components.ChannelCapabilities.icon_with_modal
-            modal_open?={@capability_modal_open}
-            snapshot={@capabilities_snapshot}
-            title={"#{@provider_label} capabilities"}
-          />
-        </div>
-        <p class="font-mono text-[0.7rem] text-black/40 mt-1">
-          Active grant insights for this data source provider.
-        </p>
-      </div>
+    <div class="flex items-center justify-end">
       <button
         id="new-config-button"
         phx-click="open_modal"

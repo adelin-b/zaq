@@ -134,6 +134,27 @@ defmodule Storybook.Layouts.BoLayout do
               description="Title shown in the fixed header."
             />
             <.attr_row
+              name="page_subtitle"
+              type="string"
+              required={false}
+              default="nil"
+              description="Optional subtitle shown under the page title in the fixed header."
+            />
+            <.attr_row
+              name="page_icon_provider"
+              type="string"
+              required={false}
+              default="nil"
+              description="Optional channel provider id rendered via ChannelIcons in the fixed header."
+            />
+            <.attr_row
+              name="page_icon_accent"
+              type="string"
+              required={false}
+              default="nil"
+              description="Optional hex accent for the page icon background."
+            />
+            <.attr_row
               name="current_path"
               type="string"
               required={false}

@@ -1,25 +1,15 @@
 <ZaqWeb.Components.BOLayout.bo_layout
   current_user={@current_user}
   flash={@flash}
-  page_title="Agents"
+  page_title="AI Agents"
+  page_subtitle="Manage BO-defined agents and choose which ones can be selected in chat."
   current_path={@current_path}
   features_version={@features_version}
   auto_dismiss={false}
 >
   <div class="mx-auto max-w-[1500px] space-y-5">
     <section class="zaq-card-default">
-      <div class="flex items-center justify-between gap-4">
-        <div>
-          <h1
-            class="zaq-text-h4 uppercase tracking-widest"
-            style="color: var(--zaq-text-color-body-default)"
-          >
-            AI Agents
-          </h1>
-          <p class="mt-1 zaq-text-body-sm" style="color: var(--zaq-text-color-body-tertiary)">
-            Manage BO-defined agents and choose which ones can be selected in chat.
-          </p>
-        </div>
+      <div class="flex items-center justify-end gap-4">
         <DSButton.button
           id="new-agent-button"
           variant={:primary}

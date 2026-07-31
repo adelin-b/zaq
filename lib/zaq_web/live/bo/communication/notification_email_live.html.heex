@@ -10,13 +10,16 @@
     current_user={@current_user}
     flash={@flash}
     page_title={@page_title}
+    page_subtitle="Choose how ZAQ receives and sends email."
+    page_icon_provider="email"
+    page_icon_accent={ZaqWeb.Live.BO.Communication.ChannelsIndexLive.provider_accent("email")}
     current_path={@current_path}
     features_version={@features_version}
   >
     <div class="mb-6">
       <.link
         navigate={~p"/bo/channels/retrieval"}
-        class="inline-flex items-center gap-1.5 font-mono text-[0.7rem] text-black/40 hover:text-black transition-colors mb-4"
+        class="inline-flex items-center gap-1.5 font-mono text-[0.7rem] text-black/40 hover:text-black transition-colors"
       >
         <svg
           class="w-3 h-3"
@@ -29,10 +32,6 @@
         </svg>
         Communication Channels
       </.link>
-      <h1 class="font-mono text-xl font-bold text-black tracking-tight">{@page_title}</h1>
-      <p class="font-mono text-[0.75rem] text-black/40 mt-1">
-        Choose how ZAQ receives and sends email.
-      </p>
     </div>
 
     <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

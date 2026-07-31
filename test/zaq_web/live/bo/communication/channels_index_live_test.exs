@@ -127,6 +127,8 @@ defmodule ZaqWeb.Live.BO.Communication.ChannelsIndexLiveTest do
       {:noreply, socket} = ChannelsIndexLive.handle_params(%{}, "", socket)
 
       assert socket.assigns.page_title == "Notification Channels"
+      assert socket.assigns.page_subtitle =~ "Outbound delivery channels"
+      refute Map.has_key?(socket.assigns, :page_icon_provider)
       assert socket.assigns.current_path == "/bo/channels/notifications"
       assert socket.assigns.kind == :notification
       assert length(socket.assigns.cards) == 1
@@ -208,6 +210,36 @@ defmodule ZaqWeb.Live.BO.Communication.ChannelsIndexLiveTest do
 
       assert ChannelsIndexLive.provider_path(:notification, "email") ==
                "/bo/channels/notifications/email"
+    end
+
+    test "page_subtitle/1 returns copy for each channels section" do
+      assert ChannelsIndexLive.page_subtitle(:index) =~ "Connect your team's communication tools"
+      assert ChannelsIndexLive.page_subtitle(:retrieval) =~ "Messaging platforms"
+      assert ChannelsIndexLive.page_subtitle(:data_source) =~ "Document sources"
+      assert ChannelsIndexLive.page_subtitle(:notification) =~ "Outbound delivery channels"
+    end
+
+    test "provider_description/1 returns card copy for known providers" do
+      assert ChannelsIndexLive.provider_description("slack") =~ "Slack"
+      assert ChannelsIndexLive.provider_description("google_drive") =~ "Google Drive"
+      assert ChannelsIndexLive.provider_description("unknown") == nil
+    end
+
+    test "provider_accent/1 returns card colour for known providers" do
+      assert ChannelsIndexLive.provider_accent("slack") == "#4A154B"
+      assert ChannelsIndexLive.provider_accent("unknown") == nil
+      assert ChannelsIndexLive.provider_accent(nil) == nil
+    end
+
+    test "category_header_icon/1 renders index-matching icons for each section" do
+      assert render_component(&ChannelsIndexLive.category_header_icon/1, kind: :retrieval) =~
+               "#eff6ff"
+
+      assert render_component(&ChannelsIndexLive.category_header_icon/1, kind: :data_source) =~
+               "#fffbeb"
+
+      assert render_component(&ChannelsIndexLive.category_header_icon/1, kind: :notification) =~
+               "w-10 h-10"
     end
   end
 

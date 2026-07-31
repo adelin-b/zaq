@@ -2,17 +2,11 @@
   current_user={@current_user}
   flash={@flash}
   page_title="Skills"
+  page_subtitle="Reusable instruction + tool bundles attachable to any agent"
   current_path={@current_path}
   features_version={@features_version}
 >
-  <!-- Header -->
-  <div class="flex items-center justify-between mb-6">
-    <div>
-      <p class="zaq-text-h2" style="color: var(--zaq-text-color-body-default)">Agent Skills</p>
-      <p class="zaq-text-body-sm" style="color: var(--zaq-text-color-body-tertiary)">
-        Reusable instruction + tool bundles attachable to any agent
-      </p>
-    </div>
+  <div class="flex items-center justify-end mb-6">
     <DSButton.button
       id="new-skill-button"
       variant={:primary}

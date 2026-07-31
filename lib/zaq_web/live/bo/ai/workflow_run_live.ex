@@ -325,10 +325,16 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
     <BOLayout.bo_layout
       current_user={@current_user}
       flash={@flash}
-      page_title={"Run — #{short_id(@run.id)}"}
+      page_title={"Run #{short_id(@run.id)}"}
       current_path={@current_path}
       features_version={@features_version}
     >
+      <:page_tag>
+        <.run_status_badge status={@run.status} />
+      </:page_tag>
+      <:subtitle>
+        Started {format_datetime_seconds(@run.started_at)} · <.run_duration run={@run} now={@now} />
+      </:subtitle>
       <div>
         <DSBreadcrumb.page_breadcrumb items={[
           %{label: "Workflows", to: ~p"/bo/workflows"},
@@ -336,71 +342,51 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowRunLive do
           %{label: "Run #{short_id(@run.id)}", current: true}
         ]} />
 
-        <%!-- Run header --%>
-        <div class="flex items-start justify-between mb-6">
-          <div class="min-w-0 mr-6">
-            <div class="flex items-center gap-3 mb-1.5">
-              <h2
-                class="zaq-text-h3 truncate"
-                style="color: var(--zaq-text-color-body-default)"
-              >
-                Run <code class="zaq-text-code">{short_id(@run.id)}</code>
-              </h2>
-              <.run_status_badge status={@run.status} />
-            </div>
-            <p
-              class="zaq-text-body-sm"
-              style="color: var(--zaq-text-color-body-secondary)"
-            >
-              Started {format_datetime_seconds(@run.started_at)} ·
-              <.run_duration run={@run} now={@now} />
-            </p>
-          </div>
-          <div class="flex items-center gap-2">
-            <button
-              :if={@run.status == "running"}
-              phx-click="pause_run"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-black/10 text-black/50 hover:bg-black/[0.03] transition-colors"
-            >
-              Pause
-            </button>
-            <button
-              :if={@run.status == "paused"}
-              phx-click="resume_run"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-[#03b6d4]/30 text-[#03b6d4] hover:bg-[#03b6d4]/10 transition-colors"
-            >
-              Resume
-            </button>
-            <button
-              :if={@run.status in ["pending", "running", "paused", "waiting"]}
-              phx-click="cancel_run"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              :if={@run.status == "waiting"}
-              phx-click="approve_step"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-green-200 text-green-700 hover:bg-green-50 transition-colors"
-            >
-              Approve
-            </button>
-            <button
-              :if={@run.status == "waiting"}
-              phx-click="reject_step"
-              class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
-            >
-              Reject
-            </button>
-            <DSButton.button
-              :if={@run.status == "failed"}
-              variant={:secondary}
-              icon="hero-arrow-path"
-              phx-click="retry_run"
-            >
-              Retry
-            </DSButton.button>
-          </div>
+        <%!-- Run actions --%>
+        <div class="flex items-center justify-end gap-2 mb-6">
+          <button
+            :if={@run.status == "running"}
+            phx-click="pause_run"
+            class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-black/10 text-black/50 hover:bg-black/[0.03] transition-colors"
+          >
+            Pause
+          </button>
+          <button
+            :if={@run.status == "paused"}
+            phx-click="resume_run"
+            class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-[#03b6d4]/30 text-[#03b6d4] hover:bg-[#03b6d4]/10 transition-colors"
+          >
+            Resume
+          </button>
+          <button
+            :if={@run.status in ["pending", "running", "paused", "waiting"]}
+            phx-click="cancel_run"
+            class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-orange-200 text-orange-600 hover:bg-orange-50 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            :if={@run.status == "waiting"}
+            phx-click="approve_step"
+            class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-green-200 text-green-700 hover:bg-green-50 transition-colors"
+          >
+            Approve
+          </button>
+          <button
+            :if={@run.status == "waiting"}
+            phx-click="reject_step"
+            class="font-mono text-[0.82rem] px-4 py-2 rounded-lg border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
+          >
+            Reject
+          </button>
+          <DSButton.button
+            :if={@run.status == "failed"}
+            variant={:secondary}
+            icon="hero-arrow-path"
+            phx-click="retry_run"
+          >
+            Retry
+          </DSButton.button>
         </div>
 
         <%!-- Approval review card --%>

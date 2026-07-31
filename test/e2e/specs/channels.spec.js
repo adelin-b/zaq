@@ -9,8 +9,7 @@ const {
 const CHANNELS_INDEX = "/bo/channels"
 const GOOGLE_DRIVE_PROVIDER = "/bo/channels/data_source/google_drive"
 
-// In-page title only — BOLayout also renders page_title in header as h1 (duplicate accessible name).
-// data-testid lives on LiveView h1s (channels_index_live, provider_live); survives zaq-text-h1 migration on body.
+// Page title and subtitle live in BOLayout header (data-testid="bo-main-page-heading" on #bo-page-title).
 
 // Keep in sync with @retrieval_preview / @data_source_preview in channels_index_live.ex
 const CHANNEL_INDEX_RETRIEVAL_PREVIEW = ["slack", "teams", "mattermost", "discord", "telegram"]

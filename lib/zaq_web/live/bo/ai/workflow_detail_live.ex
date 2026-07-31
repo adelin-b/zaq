@@ -289,69 +289,53 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowDetailLive do
       current_user={@current_user}
       flash={@flash}
       page_title={@workflow.name}
+      page_subtitle={@workflow.description}
       current_path={@current_path}
       features_version={@features_version}
     >
+      <:page_tag>
+        <.workflow_status_badge status={@workflow.status} />
+      </:page_tag>
       <div id="workflow-detail" phx-hook="WorkflowExport">
         <DSBreadcrumb.page_breadcrumb items={[
           %{label: "Workflows", to: ~p"/bo/workflows"},
           %{label: @workflow.name, current: true}
         ]} />
 
-        <%!-- Page header --%>
-        <div class="flex items-start justify-between mb-6">
-          <div class="min-w-0 mr-6">
-            <div class="flex items-center gap-3 mb-1.5">
-              <h2
-                class="zaq-text-h3 truncate"
-                style="color: var(--zaq-text-color-body-default)"
-              >
-                {@workflow.name}
-              </h2>
-              <.workflow_status_badge status={@workflow.status} />
-            </div>
-            <p
-              :if={@workflow.description}
-              class="zaq-text-body-sm"
-              style="color: var(--zaq-text-color-body-secondary)"
-            >
-              {@workflow.description}
-            </p>
-          </div>
-          <div class="flex items-center gap-2 flex-shrink-0">
-            <DSButton.button
-              variant={:primary}
-              icon="hero-play"
-              phx-click="run_workflow"
-              phx-value-workflow_id={@workflow.id}
-              title="Run workflow manually"
-            >
-              Run
-            </DSButton.button>
-            <DSButton.button variant={:secondary} phx-click="export">
-              Export
-            </DSButton.button>
-            <DSButton.button variant={:secondary} phx-click="toggle_status">
-              {toggle_status_label(@workflow.status)}
-            </DSButton.button>
-            <DSButton.button
-              variant={:secondary}
-              icon="hero-pencil-square"
-              icon_only
-              aria-label="Edit workflow"
-              title="Edit"
-              phx-click="open_edit"
-            />
-            <DSButton.button
-              variant={:tertiary}
-              danger
-              icon="hero-trash"
-              icon_only
-              aria-label="Delete workflow"
-              title="Delete"
-              phx-click="open_delete"
-            />
-          </div>
+        <%!-- Page actions --%>
+        <div class="flex items-center justify-end gap-2 mb-6">
+          <DSButton.button
+            variant={:primary}
+            icon="hero-play"
+            phx-click="run_workflow"
+            phx-value-workflow_id={@workflow.id}
+            title="Run workflow manually"
+          >
+            Run
+          </DSButton.button>
+          <DSButton.button variant={:secondary} phx-click="export">
+            Export
+          </DSButton.button>
+          <DSButton.button variant={:secondary} phx-click="toggle_status">
+            {toggle_status_label(@workflow.status)}
+          </DSButton.button>
+          <DSButton.button
+            variant={:secondary}
+            icon="hero-pencil-square"
+            icon_only
+            aria-label="Edit workflow"
+            title="Edit"
+            phx-click="open_edit"
+          />
+          <DSButton.button
+            variant={:tertiary}
+            danger
+            icon="hero-trash"
+            icon_only
+            aria-label="Delete workflow"
+            title="Delete"
+            phx-click="open_delete"
+          />
         </div>
 
         <%!-- Metadata + DAG side by side --%>

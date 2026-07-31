@@ -172,9 +172,99 @@ defmodule ZaqWeb.Live.BO.Communication.ChannelsIndexLive do
     {:noreply,
      socket
      |> assign(:page_title, page_title)
+     |> assign(:page_subtitle, page_subtitle(kind))
      |> assign(:current_path, current_path)
      |> assign(:kind, kind)
      |> assign(:cards, cards)}
+  end
+
+  attr :kind, :atom, required: true
+
+  @doc """
+  Category icon for channels sub-page headers — matches the index category cards,
+  not the first provider in the grid.
+  """
+  def category_header_icon(assigns) do
+    ~H"""
+    <div
+      class="w-10 h-10 rounded-xl grid place-items-center shrink-0"
+      style={category_header_icon_style(@kind)}
+    >
+      <%= case @kind do %>
+        <% :retrieval -> %>
+          <svg
+            class="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            viewBox="0 0 24 24"
+            style="color: #3b82f6;"
+          >
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+          </svg>
+        <% :data_source -> %>
+          <svg
+            class="w-6 h-6"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.8"
+            viewBox="0 0 24 24"
+            style="color: #f59e0b;"
+          >
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+            <line x1="16" y1="13" x2="8" y2="13" />
+            <line x1="16" y1="17" x2="8" y2="17" />
+          </svg>
+        <% :notification -> %>
+          <ZaqWeb.Components.ChannelIcons.icon provider="email" class="w-6 h-6" />
+      <% end %>
+    </div>
+    """
+  end
+
+  defp category_header_icon_style(:retrieval), do: "background-color: #eff6ff;"
+  defp category_header_icon_style(:data_source), do: "background-color: #fffbeb;"
+
+  defp category_header_icon_style(:notification),
+    do: "background-color: #16a34a14; border: 1px solid #16a34a33;"
+
+  defp category_header_icon_style(_), do: "background: var(--zaq-surface-color-base);"
+
+  @doc "Subtitle copy for the channels index and category grid pages."
+  def page_subtitle(:index),
+    do: "Connect your team's communication tools to centralize messages and automate workflows."
+
+  def page_subtitle(:retrieval),
+    do: "Messaging platforms that receive user questions and return answers from ZAQ."
+
+  def page_subtitle(:data_source),
+    do: "Document sources that feed the knowledge base with files and content."
+
+  def page_subtitle(:notification),
+    do: "Outbound delivery channels for alerts, invitations, and system notifications."
+
+  @doc "Provider card description reused on provider detail pages."
+  def provider_description(provider_id) do
+    (@retrieval_cards ++ @data_source_cards ++ @notification_cards)
+    |> Enum.find_value(fn
+      %{id: ^provider_id, desc: desc} -> desc
+      _ -> nil
+    end)
+  end
+
+  @doc "Brand accent colour from channel card definitions."
+  def provider_accent(nil), do: nil
+
+  def provider_accent(provider_id) do
+    case provider_card(provider_id) do
+      %{color: color} -> color
+      _ -> nil
+    end
+  end
+
+  defp provider_card(id) do
+    Enum.find(@retrieval_cards ++ @data_source_cards ++ @notification_cards, &(&1.id == id))
   end
 
   # --- Helpers used by template ---

@@ -2,11 +2,21 @@
   current_user={@current_user}
   flash={@flash}
   page_title={@provider_label}
+  page_subtitle={ZaqWeb.Live.BO.Communication.ChannelsIndexLive.provider_description(@provider)}
+  page_icon_provider={@provider}
+  page_icon_accent={ZaqWeb.Live.BO.Communication.ChannelsIndexLive.provider_accent(@provider)}
   current_path={@current_path}
   features_version={@features_version}
 >
+  <:page_tag>
+    <ZaqWeb.Components.ChannelCapabilities.icon_with_modal
+      modal_open?={@capability_modal_open}
+      snapshot={@capabilities_snapshot}
+      title={"#{@provider_label} capabilities"}
+    />
+  </:page_tag>
   <div id="oauth-popup-listener" phx-hook="OAuthPopupListener"></div>
-  <!-- Back nav + Header -->
+  <!-- Back nav + actions -->
   <div class="mb-6">
     <.link
       navigate={@back_path}
@@ -17,31 +27,7 @@
       </svg>
       {@back_label}
     </.link>
-    <div class="flex items-center justify-between">
-      <div class="flex items-center gap-3">
-        <div class="w-10 h-10 rounded-xl bg-[#0058CC]/10 grid place-items-center">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none">
-            <path
-              d="M12 2C6.48 2 2 6.02 2 11c0 2.67 1.18 5.07 3.07 6.75L4 22l4.83-2.5C10.1 19.82 11.02 20 12 20c5.52 0 10-4.02 10-9S17.52 2 12 2z"
-              fill="#0058CC"
-            />
-            <path d="M7 10h2v5H7zM11 10h2v5h-2zM15 10h2v5h-2z" fill="white" />
-          </svg>
-        </div>
-        <div>
-          <div class="flex items-center gap-2">
-            <h1 class="font-mono text-lg font-bold text-black">{@provider_label}</h1>
-            <ZaqWeb.Components.ChannelCapabilities.icon_with_modal
-              modal_open?={@capability_modal_open}
-              snapshot={@capabilities_snapshot}
-              title={"#{@provider_label} capabilities"}
-            />
-          </div>
-          <p class="font-mono text-[0.7rem] text-black/40 mt-0.5">
-            Manage configs and interact with your Mattermost instance
-          </p>
-        </div>
-      </div>
+    <div class="flex items-center justify-end">
       <button
         id="new-config-button"
         phx-click="open_modal"

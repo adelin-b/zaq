@@ -308,35 +308,23 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowsLive do
       current_user={@current_user}
       flash={@flash}
       page_title="Workflows"
+      page_subtitle="Automated multi-step processes triggered by events or schedules."
       current_path={@current_path}
       features_version={@features_version}
     >
       <div class="space-y-4">
-        <%!-- Page header + filters card --%>
-        <section class="rounded-xl border border-[#e6e2db] bg-white px-5 py-4">
-          <div class="flex items-center justify-between gap-4">
-            <div>
-              <h1 class="font-mono text-[0.9rem] uppercase tracking-widest text-[#3e3b36]">
-                Workflows
-              </h1>
-              <p class="mt-1 font-mono text-[0.7rem] text-[#8e8a82]">
-                Automated multi-step processes triggered by events or schedules.
-              </p>
-            </div>
-            <div class="flex items-center gap-3">
-              <.link
-                navigate={~p"/bo/triggers"}
-                class="rounded-lg border border-[#e6e2db] px-3 py-2 font-mono text-[0.72rem] text-[#3e3b36] hover:border-[#03b6d4] transition-colors"
-              >
-                Triggers
-              </.link>
-              <button
-                phx-click="open_import"
-                class="rounded-lg bg-[#03b6d4] px-3 py-2 font-mono text-[0.72rem] uppercase tracking-wider text-white hover:bg-[#0198b1] transition-colors"
-              >
-                Import Workflow
-              </button>
-            </div>
+        <%!-- Filters + actions card --%>
+        <section class="zaq-card-default">
+          <div class="flex items-center justify-end gap-3">
+            <.link
+              navigate={~p"/bo/triggers"}
+              class="zaq-btn zaq-btn-secondary"
+            >
+              Triggers
+            </.link>
+            <DSButton.button variant={:primary} phx-click="open_import">
+              Import Workflow
+            </DSButton.button>
           </div>
 
           <form id="workflow-filters-form" phx-change="filter" class="mt-4 grid grid-cols-2 gap-3">
@@ -345,11 +333,11 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowsLive do
               name="filters[name]"
               value={@filters["name"]}
               placeholder="Filter by name"
-              class="rounded-lg border border-[#e6e2db] px-3 py-2 font-mono text-[0.72rem] text-[#3e3b36] outline-none focus:border-[#03b6d4] focus:ring-1 focus:ring-[#03b6d4]"
+              class="zaq-control-text"
             />
             <select
               name="filters[status]"
-              class="rounded-lg border border-[#e6e2db] px-3 py-2 font-mono text-[0.72rem] text-[#3e3b36] outline-none focus:border-[#03b6d4] focus:ring-1 focus:ring-[#03b6d4]"
+              class="zaq-control-select"
             >
               <option value="all" selected={@filters["status"] == "all"}>All statuses</option>
               <option value="active" selected={@filters["status"] == "active"}>Active</option>
