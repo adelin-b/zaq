@@ -138,6 +138,96 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUploadTest do
 
       refute html =~ ~s(phx-change="select_resource_volume")
     end
+
+    test "renders a footer Cancel wired to the cancel event" do
+      html = render_modal([])
+
+      assert html =~ ~s(phx-click="close_resource_modal")
+      assert html =~ "Cancel"
+      assert html =~ "zaq-modal-form-footer"
+    end
+
+    test "renders footer submit next to Cancel, disabled until a file is queued" do
+      html = render_modal([])
+
+      assert html =~ ~s(form="skill-resource-form")
+      assert html =~ ~s(type="submit")
+      assert html =~ "Add 0 file(s)"
+      assert html =~ "disabled"
+      assert html |> String.split("skill-resource-files-button") |> length() == 2
+    end
+  end
+
+  describe "modal_upload/1 configured for workflow import" do
+    defp workflow_uploads do
+      %{
+        workflow_file: %{
+          uploads().skill_resources
+          | name: :workflow_file,
+            max_entries: 1,
+            max_file_size: 1_000_000
+        }
+      }
+    end
+
+    defp render_workflow_modal(overrides \\ []) do
+      defaults = [
+        id: "import-modal",
+        title: "Import Workflow",
+        cancel_event: "close_import",
+        uploads: workflow_uploads(),
+        upload_name: :workflow_file,
+        id_prefix: "workflow-import",
+        submit_event: "import_workflow",
+        change_event: "validate_import",
+        file_cancel_event: "cancel_workflow_upload",
+        label: "Workflow export file",
+        submit_label: "Import",
+        hint: ".json, .jsonc — max 1 MB",
+        too_large_message: "File exceeds 1 MB limit.",
+        folder_drop?: false,
+        description: "Upload a .json or .jsonc workflow export file."
+      ]
+
+      render_component(
+        &ModalUpload.modal_upload/1,
+        Keyword.merge(defaults, overrides)
+      )
+    end
+
+    test "renders the workflow-scoped dropzone ids and events" do
+      html = render_workflow_modal()
+
+      assert html =~ ~s(id="workflow-import-form")
+      assert html =~ ~s(id="workflow-import-drop-zone")
+      assert html =~ ~s(phx-submit="import_workflow")
+      assert html =~ ~s(phx-change="validate_import")
+      refute html =~ "FolderDrop"
+    end
+
+    test "shows description, hint and server-side error when given" do
+      html =
+        render_workflow_modal(error: "File is not valid JSON or JSONC.")
+
+      assert html =~ "Upload a .json or .jsonc workflow export file."
+      assert html =~ ".json, .jsonc — max 1 MB"
+      assert html =~ "File is not valid JSON or JSONC."
+    end
+
+    test "renders footer Cancel wired to close_import" do
+      html = render_workflow_modal()
+
+      assert html =~ ~s(phx-click="close_import")
+      assert html =~ "Cancel"
+    end
+
+    test "renders Import N file(s) submit in the footer, wired to the dropzone form" do
+      html = render_workflow_modal()
+
+      assert html =~ ~s(form="workflow-import-form")
+      assert html =~ "Import 0 file(s)"
+      assert html =~ "disabled"
+    end
   end
 
   describe "modal_upload/1 defaults (ingestion)" do
@@ -169,6 +259,22 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUploadTest do
 
     test "keeps the ingestion hint" do
       assert render_ingestion_modal() =~ ".docx"
+    end
+
+    test "renders a footer Cancel wired to the default cancel event" do
+      html = render_ingestion_modal()
+
+      assert html =~ ~s(phx-click="close_modal")
+      assert html =~ "Cancel"
+    end
+
+    test "renders Upload N file(s) submit in the footer, disabled with an empty queue" do
+      html = render_ingestion_modal()
+
+      assert html =~ ~s(form="upload-form")
+      assert html =~ ~s(id="upload-files-button")
+      assert html =~ "Upload 0 file(s)"
+      assert html =~ "disabled"
     end
   end
 

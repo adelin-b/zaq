@@ -34,9 +34,17 @@ defmodule ZaqWeb.Components.DesignSystem.Dropzone do
 
   attr :hint, :string, default: @default_hint
 
+  attr :too_large_message, :string,
+    default: "File exceeds 20 MB limit.",
+    doc: "Shown when a queued file exceeds `max_file_size` from `allow_upload/3`."
+
   attr :folder_drop?, :boolean,
     default: true,
     doc: "Attaches the FolderDrop JS hook, which expands dropped directories."
+
+  attr :show_submit?, :boolean,
+    default: true,
+    doc: "When false, omit the inline submit control (modal footers use `form` + `type=submit`)."
 
   def upload_section(assigns) do
     assigns = assign(assigns, :upload, Map.fetch!(assigns.uploads, assigns.upload_name))
@@ -109,20 +117,20 @@ defmodule ZaqWeb.Components.DesignSystem.Dropzone do
             </div>
             <%= for err <- Phoenix.Component.upload_errors(@upload, entry) do %>
               <p class="zaq-text-caption mt-1" style="color: var(--zaq-text-color-body-danger)">
-                {upload_error_message(err)}
+                {upload_error_message(err, @too_large_message)}
               </p>
             <% end %>
           </div>
         <% end %>
 
-        <div :if={@upload.entries != []} style="margin-top: var(--zaq-scale-16)">
+        <div :if={@show_submit? and @upload.entries != []} style="margin-top: var(--zaq-scale-16)">
           <button
             id={"#{@id_prefix}-files-button"}
             type="submit"
             disabled={not @embedding_ready}
             class="zaq-btn zaq-btn-primary zaq-btn-text_label-default"
           >
-            {@submit_label} {length(@upload.entries)} file(s)
+            {submit_button_label(@submit_label, @upload.entries)}
           </button>
         </div>
 
@@ -149,8 +157,13 @@ defmodule ZaqWeb.Components.DesignSystem.Dropzone do
   def skip_reason("unsupported_format"), do: "unsupported format"
   def skip_reason(_), do: "skipped"
 
-  defp upload_error_message(:too_large), do: "File exceeds 20 MB limit."
-  defp upload_error_message(:not_accepted), do: "File type not supported."
-  defp upload_error_message(:too_many_files), do: "Too many files selected (max 10)."
-  defp upload_error_message(_), do: "Upload failed."
+  @doc "Shared `{verb} N file(s)` copy for inline and modal-footer submit buttons."
+  def submit_button_label(submit_label, entries) when is_list(entries) do
+    "#{submit_label} #{length(entries)} file(s)"
+  end
+
+  defp upload_error_message(:too_large, message), do: message
+  defp upload_error_message(:not_accepted, _message), do: "File type not supported."
+  defp upload_error_message(:too_many_files, _message), do: "Too many files selected (max 10)."
+  defp upload_error_message(_, _message), do: "Upload failed."
 end

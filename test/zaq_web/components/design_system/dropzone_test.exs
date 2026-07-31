@@ -110,6 +110,17 @@ defmodule ZaqWeb.Components.DesignSystem.DropzoneTest do
       refute html =~ "FolderDrop"
     end
 
+    test "omits the inline submit control when show_submit? is false" do
+      html =
+        render_component(&Dropzone.upload_section/1,
+          uploads: %{files: upload_config(:files, [entry()])},
+          show_submit?: false
+        )
+
+      refute html =~ "upload-files-button"
+      refute html =~ "Upload 1 file(s)"
+    end
+
     test "two dropzones in one document produce distinct element ids" do
       ingestion =
         render_component(&Dropzone.upload_section/1, uploads: %{files: upload_config(:files)})
@@ -144,6 +155,20 @@ defmodule ZaqWeb.Components.DesignSystem.DropzoneTest do
       assert html =~ "disabled"
     end
 
+    test "uses a custom too_large_message when configured" do
+      entry = entry()
+      upload = upload_config(:files, [entry])
+
+      html =
+        render_component(&Dropzone.upload_section/1,
+          uploads: %{files: %{upload | errors: [{entry.ref, :too_large}]}},
+          too_large_message: "File exceeds 1 MB limit."
+        )
+
+      assert html =~ "File exceeds 1 MB limit."
+      refute html =~ "File exceeds 20 MB limit."
+    end
+
     test "renders skipped folder entries with their reason" do
       html =
         render_component(&Dropzone.upload_section/1,
@@ -156,6 +181,13 @@ defmodule ZaqWeb.Components.DesignSystem.DropzoneTest do
       assert html =~ ~s(data-testid="skipped-files")
       assert html =~ "notes.key"
       assert html =~ "unsupported format"
+    end
+  end
+
+  describe "submit_button_label/2" do
+    test "formats the shared submit copy" do
+      assert Dropzone.submit_button_label("Import", []) == "Import 0 file(s)"
+      assert Dropzone.submit_button_label("Upload", [%{}]) == "Upload 1 file(s)"
     end
   end
 

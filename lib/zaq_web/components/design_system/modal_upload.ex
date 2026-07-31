@@ -9,19 +9,28 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUpload do
     * **volume picker** — `volumes`; renders only when more than one is configured, so a
       single-volume deployment never sees a control with one option
     * **destination preview** — `destination`; renders only when given
+    * **description** — optional intro copy above the dropzone (workflows import)
+    * **error** — optional server-side failure banner (workflows JSON validation, etc.)
+    * **footer actions** — Cancel plus primary submit (wired to the dropzone form via
+      `form={id_prefix}-form`); submit shows `{submit_label} N file(s)` and stays disabled
+      until at least one file is queued
     * **dropzone wiring** — `upload_name`, `id_prefix`, the three event names, the two
-      labels, `hint` and `folder_drop?` are forwarded straight through, because two
-      dropzones in one DOM must not share element ids
+      labels, `hint`, `too_large_message` and `folder_drop?` are forwarded straight
+      through, because two dropzones in one DOM must not share element ids
 
-  Each is off or ingestion-shaped by default. Configure it; do not fork it — the skills
-  page needs the same dialog with a volume picker and flat (no folder-drop) uploads, not a
-  second modal.
+  Each is off or ingestion-shaped by default. Configure it; do not fork it — skills and
+  workflows need the same dialog with different wiring, not a second modal.
   """
 
   use Phoenix.Component
 
+  alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
+
   import ZaqWeb.Components.BOModal
-  import ZaqWeb.Components.DesignSystem.Dropzone, only: [upload_section: 1, default_hint: 0]
+
+  import ZaqWeb.Components.DesignSystem.Dropzone,
+    only: [upload_section: 1, default_hint: 0, submit_button_label: 2]
+
   import ZaqWeb.CoreComponents, only: [icon: 1]
   import ZaqWeb.Select, only: [select: 1]
 
@@ -29,6 +38,15 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUpload do
   attr :id, :string, default: "upload-modal"
   attr :title, :string, default: "Upload data"
   attr :cancel_event, :string, default: "close_modal"
+  attr :cancel_label, :string, default: "Cancel"
+
+  attr :description, :string,
+    default: nil,
+    doc: "Optional intro copy shown above the dropzone."
+
+  attr :error, :string,
+    default: nil,
+    doc: "Optional server-side failure message (import validation, etc.)."
 
   # Ingestion-only chrome inside the dropzone.
   attr :embedding_ready, :boolean, default: true
@@ -55,10 +73,20 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUpload do
   attr :label, :string, default: "Upload"
   attr :submit_label, :string, default: "Upload"
   attr :hint, :string, default: nil
+  attr :too_large_message, :string, default: "File exceeds 20 MB limit."
   attr :folder_drop?, :boolean, default: true
 
   def modal_upload(assigns) do
-    assigns = assign(assigns, :volume_options, volume_options(assigns.volumes))
+    upload = Map.fetch!(assigns.uploads, assigns.upload_name)
+    entry_count = length(upload.entries)
+
+    assigns =
+      assigns
+      |> assign(:volume_options, volume_options(assigns.volumes))
+      |> assign(:form_id, "#{assigns.id_prefix}-form")
+      |> assign(:submit_button_id, "#{assigns.id_prefix}-files-button")
+      |> assign(:submit_button_label, submit_button_label(assigns.submit_label, upload.entries))
+      |> assign(:submit_disabled, entry_count == 0 or not assigns.embedding_ready)
 
     ~H"""
     <.form_dialog
@@ -67,6 +95,20 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUpload do
       title={@title}
       max_width_class="zaq-modal--width-xl"
     >
+      <:actions>
+        <DSButton.button variant={:secondary} phx-click={@cancel_event}>
+          {@cancel_label}
+        </DSButton.button>
+        <DSButton.button
+          variant={:primary}
+          type="submit"
+          form={@form_id}
+          id={@submit_button_id}
+          disabled={@submit_disabled}
+        >
+          {@submit_button_label}
+        </DSButton.button>
+      </:actions>
       <div class="zaq-layout-stack">
         <form :if={length(@volume_options) > 1} phx-change={@volume_event}>
           <.select
@@ -86,6 +128,14 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUpload do
           Uploads to <span class="zaq-text-code">{@destination}</span>
         </p>
 
+        <p
+          :if={@description}
+          class="zaq-text-body-sm"
+          style="color: var(--zaq-text-color-body-tertiary)"
+        >
+          {@description}
+        </p>
+
         <.upload_section
           uploads={@uploads}
           embedding_ready={@embedding_ready}
@@ -98,8 +148,14 @@ defmodule ZaqWeb.Components.DesignSystem.ModalUpload do
           label={@label}
           submit_label={@submit_label}
           hint={@hint || default_hint()}
+          too_large_message={@too_large_message}
           folder_drop?={@folder_drop?}
+          show_submit?={false}
         />
+
+        <div :if={@error} class="px-3 py-2 rounded-xl bg-red-50 border border-red-100">
+          <p class="font-mono text-[0.72rem] text-red-500">{@error}</p>
+        </div>
       </div>
     </.form_dialog>
     """

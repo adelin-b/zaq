@@ -8,6 +8,7 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowsLive do
   import ZaqWeb.Live.BO.AI.WorkflowRunHelpers, only: [manual_source_event: 1]
 
   alias ZaqWeb.Components.DesignSystem.Button, as: DSButton
+  alias ZaqWeb.Components.DesignSystem.ModalUpload
   alias ZaqWeb.Components.DesignSystem.Table, as: DSTable
 
   import DSTable,
@@ -24,7 +25,7 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowsLive do
     ]
 
   alias Zaq.Event
-  alias ZaqWeb.Components.{BOFileUpload, BOLayout, BOModal}
+  alias ZaqWeb.Components.BOLayout
 
   @impl true
   def mount(_params, _session, socket) do
@@ -535,74 +536,25 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowsLive do
       <%!-- space-y-4 wrapper --%>
 
       <%!-- Import modal --%>
-      <BOModal.form_dialog
+      <ModalUpload.modal_upload
         :if={@import_modal_open}
         id="import-modal"
         title="Import Workflow"
         cancel_event="close_import"
-      >
-        <form phx-submit="import_workflow" phx-change="validate_import" class="space-y-4">
-          <p class="font-mono text-[0.82rem] text-black">
-            Upload a <code class="text-black/70">.json</code>
-            or <code class="text-black/70">.jsonc</code>
-            workflow export file.
-          </p>
-
-          <BOFileUpload.drop_zone
-            upload={@uploads.workflow_file}
-            id="workflow-import-drop-zone"
-            accept_label=".json, .jsonc"
-          />
-
-          <div
-            :for={entry <- @uploads.workflow_file.entries}
-            class="flex items-center justify-between px-3 py-2 rounded-lg bg-black/[0.02] border border-black/10"
-          >
-            <span class="font-mono text-[0.8rem] text-[var(--zaq-color-ink)] truncate">
-              {entry.client_name}
-            </span>
-            <button
-              type="button"
-              phx-click="cancel_workflow_upload"
-              phx-value-ref={entry.ref}
-              class="ml-3 flex-shrink-0 font-mono text-[0.9rem] text-black/30 hover:text-red-400 transition-colors"
-              aria-label="Remove"
-            >
-              &times;
-            </button>
-          </div>
-
-          <%= for entry <- @uploads.workflow_file.entries,
-                  err <- upload_errors(@uploads.workflow_file, entry) do %>
-            <p class="font-mono text-[0.72rem] text-red-500">
-              {entry.client_name}: {upload_error_label(err)}
-            </p>
-          <% end %>
-
-          <p
-            :if={@import_error}
-            class="font-mono text-[0.72rem] text-red-500 bg-red-50 rounded px-3 py-2"
-          >
-            {@import_error}
-          </p>
-
-          <div class="flex justify-end gap-3 pt-2">
-            <button
-              type="button"
-              phx-click="close_import"
-              class="font-mono text-[0.82rem] text-[var(--zaq-color-ink)] px-4 py-2 rounded-lg border border-black/15 hover:bg-black/5 transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              class="font-mono text-[0.82rem] font-bold px-5 py-2.5 rounded-xl bg-[#03b6d4] text-white hover:bg-[#029ab3] transition-all"
-            >
-              Import
-            </button>
-          </div>
-        </form>
-      </BOModal.form_dialog>
+        uploads={@uploads}
+        upload_name={:workflow_file}
+        id_prefix="workflow-import"
+        submit_event="import_workflow"
+        change_event="validate_import"
+        file_cancel_event="cancel_workflow_upload"
+        label="Workflow export file"
+        submit_label="Import"
+        hint=".json, .jsonc — max 1 MB"
+        too_large_message="File exceeds 1 MB limit."
+        folder_drop?={false}
+        description="Upload a .json or .jsonc workflow export file."
+        error={@import_error}
+      />
     </BOLayout.bo_layout>
     """
   end
@@ -642,11 +594,6 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowsLive do
   end
 
   defp node_router, do: Application.get_env(:zaq, :node_router, Zaq.NodeRouter)
-
-  defp upload_error_label(:too_large), do: "file exceeds size limit"
-  defp upload_error_label(:not_accepted), do: "file type not accepted"
-  defp upload_error_label(:too_many_files), do: "too many files"
-  defp upload_error_label(_), do: "upload failed"
 
   defp page_window(_current, total) when total <= 7, do: Enum.to_list(1..total)
 

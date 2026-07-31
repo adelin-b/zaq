@@ -774,7 +774,7 @@ defmodule ZaqWeb.Live.BO.AI.WorkflowsLiveTest do
         ])
 
       assert {:error, _} = render_upload(upload, "big.json")
-      assert render(view) =~ "file exceeds size limit"
+      assert render(view) =~ "File exceeds 1 MB limit."
     end
 
     test "rejects a second file when max_entries is 1", %{conn: conn} do

@@ -132,6 +132,32 @@ defmodule Storybook.Ingestion.ModalUpload do
           class="zaq-text-caption"
           style="color: var(--zaq-text-color-body-tertiary); margin-bottom: var(--zaq-scale-12);"
         >
+          Configured for workflow import — flat JSON upload with server-side error
+        </p>
+        <.modal_upload
+          id="import-modal"
+          title="Import Workflow"
+          cancel_event="close_import"
+          uploads={workflow_uploads()}
+          upload_name={:workflow_file}
+          id_prefix="workflow-import"
+          submit_event="import_workflow"
+          change_event="validate_import"
+          file_cancel_event="cancel_workflow_upload"
+          label="Workflow export file"
+          submit_label="Import"
+          hint=".json, .jsonc — max 1 MB"
+          too_large_message="File exceeds 1 MB limit."
+          folder_drop?={false}
+          description="Upload a .json or .jsonc workflow export file."
+          error="File is not valid JSON or JSONC."
+        />
+      </section>
+      <section>
+        <p
+          class="zaq-text-caption"
+          style="color: var(--zaq-text-color-body-tertiary); margin-bottom: var(--zaq-scale-12);"
+        >
           Blocked — no volume connected
         </p>
         <.modal_no_volume />
@@ -150,6 +176,25 @@ defmodule Storybook.Ingestion.ModalUpload do
         accept: :any,
         max_entries: 10,
         max_file_size: 5_242_880,
+        chunk_size: 64_000,
+        chunk_timeout: 10_000,
+        external: false,
+        auto_upload?: false,
+        progress_event: nil
+      }
+    }
+  end
+
+  defp workflow_uploads do
+    %{
+      workflow_file: %Phoenix.LiveView.UploadConfig{
+        ref: "phx-upload-ref",
+        entries: [],
+        errors: [],
+        name: :workflow_file,
+        accept: :any,
+        max_entries: 1,
+        max_file_size: 1_000_000,
         chunk_size: 64_000,
         chunk_timeout: 10_000,
         external: false,
