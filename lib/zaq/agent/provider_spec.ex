@@ -20,6 +20,8 @@ defmodule Zaq.Agent.ProviderSpec do
   # field marks a provider's default endpoint, not whether it is user-overridable. For example,
   # both `openai` (overridable) and `anthropic` (not overridable) have `base_url` in the catalog.
   @fixed_url_providers ~w(anthropic google xai mistral)a
+  @zaq_router_responses_model "openai/gpt-oss-120b"
+  @openai_responses_wire %{wire: %{protocol: "openai_responses"}}
 
   @doc """
   Maps a provider string or atom to the atom ReqLLM expects.
@@ -99,6 +101,7 @@ defmodule Zaq.Agent.ProviderSpec do
 
     %{provider: provider, id: cfg.model}
     |> put_base_url(cfg)
+    |> put_supported_api_surface(cfg.provider, cfg.model)
   end
 
   @spec build(ConfiguredAgent.t()) :: {:ok, map()} | {:error, atom()}
@@ -108,8 +111,12 @@ defmodule Zaq.Agent.ProviderSpec do
         Zaq.System.get_ai_provider_credential(configured_agent.credential_id)
 
     with {:ok, runtime_provider} <- resolve_configured_provider(configured_agent, credential) do
-      spec = %{provider: runtime_provider, id: configured_agent.model}
-      {:ok, put_base_url(spec, runtime_provider, credential)}
+      spec =
+        %{provider: runtime_provider, id: configured_agent.model}
+        |> put_base_url(runtime_provider, credential)
+        |> put_supported_api_surface(credential_provider(credential), configured_agent.model)
+
+      {:ok, spec}
     end
   end
 
@@ -146,6 +153,25 @@ defmodule Zaq.Agent.ProviderSpec do
       end
     end
   end
+
+  # ZAQ Router exposes GPT-OSS tool calling on /responses; Chat Completions corrupts Harmony headers.
+  defp put_supported_api_surface(spec, provider, model)
+       when provider in [:zaq_router, "zaq_router"] and is_binary(model) do
+    if model == @zaq_router_responses_model or
+         String.starts_with?(model, @zaq_router_responses_model <> ":") do
+      spec
+      |> Map.put(:provider, :openai)
+      |> Map.put(:extra, @openai_responses_wire)
+    else
+      spec
+    end
+  end
+
+  defp put_supported_api_surface(spec, _provider, _model), do: spec
+
+  defp credential_provider(%{provider: provider}), do: provider
+  defp credential_provider(%{"provider" => provider}), do: provider
+  defp credential_provider(_credential), do: nil
 
   # Falls back to :openai only when the provider is unknown to both ReqLLM and LLMDB
   # but the credential carries an explicit endpoint — signals an intentional

@@ -134,6 +134,52 @@ defmodule Zaq.Agent.ProviderSpecTest do
       assert spec.base_url == "https://my-llm.example.com/v1"
     end
 
+    test "uses the Responses API for GPT-OSS through ZAQ Router" do
+      credential =
+        ai_credential_fixture(%{
+          name: "ZAQ Router Credential #{System.unique_integer([:positive, :monotonic])}",
+          provider: "zaq_router",
+          endpoint: "https://llm.zaq.ai",
+          api_key: "test-key"
+        })
+
+      for model_id <- ["openai/gpt-oss-120b", "openai/gpt-oss-120b:fp4"] do
+        configured_agent = %{
+          agent_base()
+          | model: model_id,
+            credential_id: credential.id
+        }
+
+        assert {:ok, spec} = ProviderSpec.build(configured_agent)
+        assert spec.provider == :openai
+        assert spec.base_url == "https://llm.zaq.ai"
+        assert spec.extra == %{wire: %{protocol: "openai_responses"}}
+
+        assert {:ok, model} = ReqLLM.model(spec)
+
+        assert {:ok, :openai_responses, ReqLLM.Providers.OpenAI.ResponsesAPI, []} =
+                 ReqLLM.RequestPlan.openai_surface(model)
+      end
+    end
+
+    test "keeps other ZAQ Router models on the native provider" do
+      credential = %{
+        provider: "zaq_router",
+        endpoint: "https://llm.zaq.ai",
+        api_key: "test-key"
+      }
+
+      configured_agent = %{
+        agent_base()
+        | model: "meta-llama/Llama-3.3-70B-Instruct",
+          credential: credential
+      }
+
+      assert {:ok, spec} = ProviderSpec.build(configured_agent)
+      assert spec.provider == :zaq_router
+      refute Map.has_key?(spec, :extra)
+    end
+
     test "does not set base_url for fixed-URL providers like anthropic" do
       credential =
         ai_credential_fixture(%{
