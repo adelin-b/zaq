@@ -3,7 +3,7 @@ defmodule Zaq.Agent.AnsweringRun do
   Answer post-processing shared by streaming transports.
   """
 
-  @source_marker ~r/\s*\[\[source:[^\]]+\]\]/u
+  @source_marker ~r/\s*\[\[\.?source:[^\]]+\]\]/u
 
   @doc """
   Removes inline source markers duplicated by the structured `zaq_sources` frame.

@@ -152,8 +152,8 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
       # including a partially-streamed source marker that must be held back.
       for cumulative <- [
             "Réponse ",
-            "Réponse générée. [[sou",
-            "Réponse générée. [[source:doc.pdf]]"
+            "Réponse générée. [[.sou",
+            "Réponse générée. [[.source:doc.pdf|p3]]"
           ] do
         Phoenix.PubSub.broadcast(
           Zaq.PubSub,
@@ -163,7 +163,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
       end
 
       outgoing = %Outgoing{
-        body: "Réponse générée. [[source:doc.pdf]]",
+        body: "Réponse générée. [[source:doc.pdf|p3]]",
         channel_id: incoming.channel_id,
         provider: :chat,
         in_reply_to: incoming.message_id,
@@ -289,8 +289,11 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     assert length(deltas) > 1
     assert Enum.join(deltas) == "Réponse générée."
     refute sse =~ "[[source"
+    refute sse =~ "[[.source"
 
-    assert sse =~ "zaq_sources"
+    sources_at = :binary.match(sse, "zaq_sources") |> elem(0)
+    stop_at = :binary.match(sse, ~s("finish_reason":"stop")) |> elem(0)
+    assert sources_at < stop_at
     assert sse =~ "data: [DONE]"
   end
 

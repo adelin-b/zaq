@@ -77,7 +77,7 @@ defmodule ZaqWeb.ChatCompletionsController do
   @default_result_timeout_ms 120_000
   # Mirrors AnsweringRun's inline-source marker; streamed deltas strip them
   # incrementally since citations ride the structured zaq_sources frame.
-  @source_marker ~r/\s*\[\[source:[^\]]+\]\]/u
+  @source_marker ~r/\s*\[\[\.?source:[^\]]+\]\]/u
 
   # ---------------------------------------------------------------------------
   # POST /v1/chat/completions

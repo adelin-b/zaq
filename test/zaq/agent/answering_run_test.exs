@@ -6,6 +6,9 @@ defmodule Zaq.Agent.AnsweringRunTest do
   test "strips inline source markers from an answer" do
     assert AnsweringRun.clean_answer("Final answer [[source:documents/report.pdf|p2]].") ==
              "Final answer."
+
+    assert AnsweringRun.clean_answer("Final answer [[.source:documents/report.pdf|p2]].") ==
+             "Final answer."
   end
 
   test "normalizes whitespace left by inline source markers" do
