@@ -131,7 +131,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
   end
 
   # ---------------------------------------------------------------------------
-  # Pipeline routing — the run flows through route_incoming_message/5 (like
+  # Pipeline routing — the run flows through route_incoming_message/4 (like
   # every other channel bridge) and the result comes back over ChatBridge
   # PubSub as {:chat_result, request_id, outgoing}.
   # ---------------------------------------------------------------------------
@@ -139,9 +139,13 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
   defmodule EchoRouter do
     @moduledoc false
     alias Zaq.Channels.ChatBridge
+    alias Zaq.Engine.IncomingMessageRouter
     alias Zaq.Engine.Messages.{Incoming, Outgoing}
+    alias Zaq.Event
 
-    def dispatch(%Zaq.Event{request: %Incoming{} = incoming} = event) do
+    def dispatch(%Event{} = event) do
+      event = IncomingMessageRouter.route(event)
+      %Event{request: %Incoming{} = incoming} = event
       topic = ChatBridge.topic(incoming.channel_id)
 
       # Progressive cumulative stream deltas, like StreamEvents flushes them —
@@ -190,11 +194,15 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
   defmodule SegmentResetRouter do
     @moduledoc false
     alias Zaq.Channels.ChatBridge
+    alias Zaq.Engine.IncomingMessageRouter
     alias Zaq.Engine.Messages.{Incoming, Outgoing}
+    alias Zaq.Event
 
     @final "Le conseil a voté le budget."
 
-    def dispatch(%Zaq.Event{request: %Incoming{} = incoming} = event) do
+    def dispatch(%Event{} = event) do
+      event = IncomingMessageRouter.route(event)
+      %Event{request: %Incoming{} = incoming} = event
       topic = ChatBridge.topic(incoming.channel_id)
 
       for cumulative <- [

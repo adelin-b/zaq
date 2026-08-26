@@ -457,7 +457,7 @@ defmodule Zaq.Channels.CommunicationBridge do
   Stamps the channel-computed conversation identity onto the incoming envelope
   as `metadata["conversation"]` (`%{"channel_type" => ..., "key" => ...}`).
 
-  Called at the channel chokepoints (`route_incoming_message/5`,
+  Called at the channel chokepoints (`route_incoming_message/4`,
   `Bridge.persist_from_incoming/5`, the `:conversation_identity` event) so
   every message reaching engine persistence already carries its identity.
   """

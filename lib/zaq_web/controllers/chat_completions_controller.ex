@@ -17,7 +17,7 @@ defmodule ZaqWeb.ChatCompletionsController do
 
   ## Pipeline routing
 
-  Requests flow through `CommunicationBridge.route_incoming_message/5` →
+  Requests flow through `CommunicationBridge.route_incoming_message/4` →
   `NodeRouter.dispatch/1` like every other channel bridge, so traces, Person
   resolution (`Zaq.People.IdentityResolver`) and conversation persistence come
   from the shared pipeline. The transport is a synchronous HTTP request, so the
@@ -158,7 +158,6 @@ defmodule ZaqWeb.ChatCompletionsController do
       # pin the default answering executor (agentic run + tool citations)
       # instead of falling back to the legacy pipeline.
       [question: run_question, default_answering_executor: true],
-      [{:global_default, Zaq.System.get_global_default_agent_id()}],
       actor_from_incoming(incoming),
       node_router: node_router_module()
     )

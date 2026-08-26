@@ -4,7 +4,7 @@ defmodule Zaq.Channels.ChatBridge do
 
   Unlike push transports, the chat channel is a synchronous HTTP request:
   `ZaqWeb.ChatCompletionsController` subscribes to `topic/1` BEFORE routing the
-  incoming message through `CommunicationBridge.route_incoming_message/5` (so
+  incoming message through `CommunicationBridge.route_incoming_message/4` (so
   the request flows through `NodeRouter.dispatch/1` like every other bridge —
   traces, person resolution and persistence come from the shared pipeline), and
   `send_reply/2` delivers the pipeline `%Outgoing{}` back to that waiting
