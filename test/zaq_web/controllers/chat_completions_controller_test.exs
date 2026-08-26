@@ -149,11 +149,11 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
       topic = ChatBridge.topic(incoming.channel_id)
 
       # Progressive cumulative stream deltas, like StreamEvents flushes them —
-      # including a partially-streamed source marker that must be held back.
+      # including a Markdown hard break and a partially-streamed source marker.
       for cumulative <- [
-            "Réponse ",
-            "Réponse générée. [[.sou",
-            "Réponse générée. [[.source:doc.pdf|p3]]"
+            "Réponse  \n",
+            "Réponse  \ngénérée. [[.sou",
+            "Réponse  \ngénérée. [[.source:doc.pdf|p3]]"
           ] do
         Phoenix.PubSub.broadcast(
           Zaq.PubSub,
@@ -163,7 +163,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
       end
 
       outgoing = %Outgoing{
-        body: "Réponse générée. [[source:doc.pdf|p3]]",
+        body: "Réponse  \ngénérée. [[source:doc.pdf|p3]]",
         channel_id: incoming.channel_id,
         provider: :chat,
         in_reply_to: incoming.message_id,
@@ -255,7 +255,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
              resp
 
     # Inline source markers are stripped — citations ride zaq_sources instead.
-    assert content == "Réponse générée."
+    assert content == "Réponse\ngénérée."
 
     assert [%{"sourceId" => "doc-1", "page" => 3, "url" => "/chat/documents/doc-1?page=3"}] =
              Enum.map(resp["zaq_sources"], &Map.take(&1, ["sourceId", "page", "url"]))
@@ -271,8 +271,8 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     assert sse =~ ~s("delta":{"role":"assistant"})
 
     # Progressive: the answer arrives across MULTIPLE content deltas that
-    # concatenate to the clean answer — markers never leak, the held-back
-    # partial marker ("[[sou") is dropped once it completes.
+    # concatenate exactly once to the terminal-cleaned answer — Markdown hard
+    # breaks are normalized and the held-back partial marker never leaks.
     deltas =
       sse
       |> String.split("\n\n", trim: true)
@@ -287,7 +287,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
       end)
 
     assert length(deltas) > 1
-    assert Enum.join(deltas) == "Réponse générée."
+    assert Enum.join(deltas) == "Réponse\ngénérée."
     refute sse =~ "[[source"
     refute sse =~ "[[.source"
 

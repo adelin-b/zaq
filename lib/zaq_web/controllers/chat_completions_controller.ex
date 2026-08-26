@@ -75,9 +75,6 @@ defmodule ZaqWeb.ChatCompletionsController do
   @max_sources 8
   @max_iter_sentinel "Maximum iterations reached"
   @default_result_timeout_ms 120_000
-  # Mirrors AnsweringRun's inline-source marker; streamed deltas strip them
-  # incrementally since citations ride the structured zaq_sources frame.
-  @source_marker ~r/\s*\[\[\.?source:[^\]]+\]\]/u
 
   # ---------------------------------------------------------------------------
   # POST /v1/chat/completions
@@ -185,9 +182,9 @@ defmodule ZaqWeb.ChatCompletionsController do
 
   # ---------------------------------------------------------------------------
   # Progressive deltas — `cumulative` is the answer text so far for the current
-  # LLM-call segment. Emit only the suffix not yet on the wire; source markers
-  # are stripped (a trailing partially-streamed marker is held back until it
-  # completes). If the text stops extending what was sent (a later ReAct
+  # LLM-call segment. Emit only the suffix not yet on the wire; use the same
+  # cleanup as the terminal result, then hold back any partial source marker.
+  # If the text stops extending what was sent (a later ReAct
   # segment restarted the accumulator), stop streaming and let the final
   # result reconcile.
   # ---------------------------------------------------------------------------
@@ -195,7 +192,8 @@ defmodule ZaqWeb.ChatCompletionsController do
   defp push_stream(%{stream?: false} = acc, _cumulative), do: acc
 
   defp push_stream(acc, cumulative) when is_binary(cumulative) do
-    emittable = cumulative |> strip_source_markers() |> safe_stream_prefix() |> ltrim_if_new(acc)
+    emittable =
+      cumulative |> AnsweringRun.clean_answer() |> safe_stream_prefix() |> ltrim_if_new(acc)
 
     cond do
       emittable == acc.sent ->
@@ -237,8 +235,6 @@ defmodule ZaqWeb.ChatCompletionsController do
 
   defp ltrim_if_new(text, %{sent: ""}), do: String.trim_leading(text)
   defp ltrim_if_new(text, _acc), do: text
-
-  defp strip_source_markers(text), do: String.replace(text, @source_marker, "")
 
   # Hold back a trailing "[", "[[" or unterminated "[[source:…" so a marker
   # split across flushes never leaks onto the wire, and trailing whitespace so
