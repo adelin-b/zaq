@@ -294,6 +294,21 @@ defmodule ZaqWeb.ChatDocumentsControllerTest do
     assert Document.get_by_source(source) == nil
   end
 
+  test "delete removes a relative source in single-volume mode", %{conn: conn, root: root} do
+    Application.put_env(:zaq, Zaq.Ingestion, base_path: root, volumes: %{})
+    rel_path = "single-volume.pdf"
+    File.write!(Path.join(root, rel_path), "%PDF-single-volume")
+    {:ok, _document} = Document.create(%{source: rel_path})
+
+    response =
+      conn
+      |> delete("/chat/documents", %{"path" => rel_path, "volume" => "default"})
+
+    assert response(response, 204) == ""
+    refute File.exists?(Path.join(root, rel_path))
+    assert Document.get_by_source(rel_path) == nil
+  end
+
   test "create-only preserves an existing file without ingestion side effects", %{
     conn: conn,
     root: root

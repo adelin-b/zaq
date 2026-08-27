@@ -859,10 +859,11 @@ defmodule Zaq.Ingestion do
     volume = Map.get(attrs, :volume) || "default"
     rel_path = SourcePath.normalize_relative(rel_path)
     source = SourcePath.build_source(volume, rel_path)
+    source_candidates = SourcePath.source_candidates(volume, rel_path)
 
     with {:ok, abs_path} <- FileExplorer.resolve_path(volume, rel_path),
          :ok <- remove_chat_document_file(abs_path),
-         :ok <- delete_chat_document_row(source) do
+         :ok <- delete_chat_document_rows(source_candidates) do
       {:ok, %{source: source}}
     end
   end
@@ -875,6 +876,15 @@ defmodule Zaq.Ingestion do
       {:error, :enoent} -> :ok
       {:error, _reason} -> {:error, :file_delete_failed}
     end
+  end
+
+  defp delete_chat_document_rows(sources) do
+    Enum.reduce_while(sources, :ok, fn source, :ok ->
+      case delete_chat_document_row(source) do
+        :ok -> {:cont, :ok}
+        {:error, _reason} = error -> {:halt, error}
+      end
+    end)
   end
 
   defp delete_chat_document_row(source) do
