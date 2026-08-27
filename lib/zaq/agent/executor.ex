@@ -63,7 +63,7 @@ defmodule Zaq.Agent.Executor do
      node-internal callers such as `RunAgent`; overrides identity-derived scopes so each
      workflow run gets its own agent server). The caller only carries the run id (and
      step index) as data — this function owns the scope policy.
-  3. `:web` provider + `metadata.conversation_id` — `"scope:bo:conv:<id>"` (BO per-conversation isolation)
+  3. `:web` or `:chat` provider + `metadata.conversation_id` — canonical per-conversation scope
   4. `actor.person.id` — `"scope:<encoded_channel>:person:<person_id>"` when present
   5. `metadata.session_id` — `"bo:session:<session_id>"` when actor person is nil and session ID is a non-empty string
   6. `"anonymous"` — fallback for all other cases
@@ -120,7 +120,7 @@ defmodule Zaq.Agent.Executor do
 
   def derive_scope(%Incoming{provider: :chat, metadata: %{conversation_id: id}}, _actor)
       when is_binary(id) and id != "",
-      do: "chat:conv:#{id}"
+      do: scoped_id(:chat, :conv, id)
 
   def derive_scope(%Incoming{provider: provider} = incoming, actor) do
     case ActorNormalizer.person_id(actor) do

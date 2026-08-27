@@ -53,9 +53,9 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     assert json_response(conn, 401)["error"]["message"] == "missing bearer token"
   end
 
-  test "403 with wrong bearer", %{conn: conn} do
+  test "401 with wrong bearer", %{conn: conn} do
     conn = conn |> put_req_header("authorization", "Bearer nope") |> post(@path, body())
-    assert json_response(conn, 403)["error"]["message"] == "invalid bearer token"
+    assert json_response(conn, 401)["error"]["message"] == "invalid bearer token"
   end
 
   # ---------------------------------------------------------------------------

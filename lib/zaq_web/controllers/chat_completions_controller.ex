@@ -35,7 +35,7 @@ defmodule ZaqWeb.ChatCompletionsController do
   ## No client-resent history
 
   The caller sends ONLY the new user message. Prior turns are rehydrated
-  server-side: the run is scoped to `chat:conv:<conversation_id>`, which cold-
+  server-side: the run is scoped to `scope:chat:conv:<conversation_id>`, which cold-
   starts the agent with that conversation's history (`Zaq.Agent.HistoryLoader`),
   and each turn is persisted by the pipeline's engine hop
   (`Zaq.Engine.Conversations.persist_from_incoming/2`) so the next cold start

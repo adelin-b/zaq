@@ -11,8 +11,7 @@ defmodule Zaq.Agent.HistoryLoader do
   import Ecto.Query
 
   alias Jido.AI.Context, as: AIContext
-  alias Zaq.Agent.MaterializationAliases
-  alias Zaq.Agent.TokenEstimator
+  alias Zaq.Agent.{AnsweringRun, MaterializationAliases, TokenEstimator}
   alias Zaq.Engine.Conversations.{Conversation, Message}
   alias Zaq.Repo
   alias Zaq.Utils.DateUtils
@@ -147,7 +146,7 @@ defmodule Zaq.Agent.HistoryLoader do
       %{role: "assistant", content: content, inserted_at: ts}, ctx ->
         AIContext.append(ctx, %AIContext.Entry{
           role: :assistant,
-          content: content || "",
+          content: AnsweringRun.clean_answer(content),
           timestamp: ts
         })
 

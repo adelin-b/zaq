@@ -17,6 +17,19 @@ defmodule Zaq.Agent.CitationNormalizerTest do
            ]
   end
 
+  test "normalizes dotted and canonical source markers identically" do
+    source = "documents/report.pdf|p2"
+    answer = "Dotted [[.source:#{source}]] canonical [[source:#{source}]]."
+
+    result = CitationNormalizer.normalize(answer, [source])
+
+    assert result.body == "Dotted [1] canonical [1]."
+
+    assert result.sources == [
+             %{"index" => 1, "type" => "document", "path" => source}
+           ]
+  end
+
   test "reuses numbers for repeated markers and drops unknown entries" do
     answer =
       "One [[source:guide.md]] Two [[source:guide.md]] Unknown [[source:missing.md]] " <>

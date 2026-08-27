@@ -528,6 +528,33 @@ defmodule Zaq.Engine.ConversationsTest do
              ]
     end
 
+    test "persists dotted and canonical source markers only as numbered citations" do
+      {:ok, conversation} = Conversations.create_conversation(conv_attrs())
+      source = "documents/report.pdf|p2"
+
+      incoming = %Zaq.Engine.Messages.Incoming{
+        content: "Cite the report",
+        channel_id: "chan-citations",
+        author_id: "citation-user",
+        provider: :mattermost,
+        metadata: %{conversation_id: conversation.id}
+      }
+
+      result = %{
+        answer: "Dotted [[.source:#{source}]] canonical [[source:#{source}]].",
+        sources: [source]
+      }
+
+      assert {:ok, %{assistant_message_id: assistant_id}} =
+               persist_from_incoming(incoming, result)
+
+      assistant = Zaq.Repo.get!(Zaq.Engine.Conversations.Message, assistant_id)
+      assert assistant.content == "Dotted [1] canonical [1]."
+      refute assistant.content =~ "[[source:"
+      refute assistant.content =~ "[[.source:"
+      assert assistant.sources == [%{"index" => 1, "path" => source, "type" => "document"}]
+    end
+
     test "creates api conversations from nil provider metadata and uses author_id as channel_user_id" do
       incoming = %Zaq.Engine.Messages.Incoming{
         content: "API inbound message",

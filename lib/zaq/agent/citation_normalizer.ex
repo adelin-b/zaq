@@ -1,7 +1,7 @@
 defmodule Zaq.Agent.CitationNormalizer do
   @moduledoc false
 
-  @marker_regex ~r/\[\[(source|memory):([^\]]+)\]\]/u
+  @marker_regex ~r/\[\[(?:\.)?(source|memory):([^\]]+)\]\]/u
   @default_memory_labels MapSet.new([
                            "llm-general-knowledge",
                            "llm-reasoning-inference",

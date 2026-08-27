@@ -144,9 +144,9 @@ defmodule Zaq.Agent.ExecutorTest do
       assert Executor.derive_scope(incoming) == "scope:bo:conv:conv-99"
     end
 
-    test "returns chat conversation scope when metadata.conversation_id is set" do
+    test "returns canonical chat conversation scope when metadata.conversation_id is set" do
       incoming = %{@base_incoming | provider: :chat, metadata: %{conversation_id: "conv-42"}}
-      assert Executor.derive_scope(incoming) == "chat:conv:conv-42"
+      assert Executor.derive_scope(incoming) == "scope:chat:conv:conv-42"
     end
 
     test "ignores conversation_id for providers without conversation scoping" do

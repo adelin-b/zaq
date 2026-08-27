@@ -1411,8 +1411,9 @@ defmodule Zaq.Agent.ServerManagerTest do
   describe "history context injection on cold spawn" do
     alias Jido.AI.Context, as: AIContext
     alias Zaq.Accounts.Person
-    alias Zaq.Agent.MaterializationAliases
+    alias Zaq.Agent.{Executor, MaterializationAliases}
     alias Zaq.Engine.Conversations.{Conversation, Message}
+    alias Zaq.Engine.Messages.Incoming
     alias Zaq.Repo
 
     defp insert_person_for_sm do
@@ -1488,6 +1489,35 @@ defmodule Zaq.Agent.ServerManagerTest do
       assert Enum.any?(messages, fn m ->
                String.ends_with?(m.content, "hello from this conversation")
              end)
+    end
+
+    test "cold-spawns chat conversation with persisted sanitized history" do
+      conv = insert_conversation_for_sm(nil, "chat")
+      insert_message_for_sm(conv, "user", "previous chat question")
+
+      insert_message_for_sm(
+        conv,
+        "assistant",
+        "previous answer [[source:docs/a.pdf]] [[.source:docs/b.pdf]]."
+      )
+
+      incoming = %Incoming{
+        content: "continue",
+        channel_id: "chat-channel",
+        provider: :chat,
+        metadata: %{conversation_id: conv.id}
+      }
+
+      configured_agent = make_agent_for_routing("HistChat")
+      server_id = "#{configured_agent.name}:#{Executor.derive_scope(incoming)}"
+
+      assert {:ok, server_ref} = ServerManager.ensure_server(configured_agent, server_id)
+      assert {:ok, status} = Jido.AgentServer.status(server_ref)
+
+      messages = AIContext.to_messages(status.raw_state.context)
+      assert Enum.map(messages, & &1.role) == [:user, :assistant]
+      assert Enum.at(messages, 0).content =~ "previous chat question"
+      assert Enum.at(messages, 1).content == "previous answer."
     end
 
     test "injects person+channel history when incoming has person_id but no conversation_id" do
