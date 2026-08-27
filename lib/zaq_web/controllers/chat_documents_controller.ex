@@ -30,23 +30,42 @@ defmodule ZaqWeb.ChatDocumentsController do
 
   Body: `path` (relative to the volume, e.g. `"PV CM X - 63450/pv.pdf"`),
   `content_base64` (file bytes), `public` (bool, folder-level flag),
-  `volume` (optional, defaults to the single-volume `"default"`).
+  `volume` (optional, defaults to the single-volume `"default"`), and
+  `create_only` (optional — preserve an existing file atomically).
 
   Dispatched to the ingestion role through NodeRouter like every other
-  cross-role call; ingestion is async — 202 means the file landed and jobs
-  were enqueued.
+  cross-role call. A newly written file returns 202 with `created: true`.
+  Create-only targets with identical content return 200 with `created: false`
+  and no side effects; targets with different content return 409.
   """
   def create(conn, %{"path" => path, "content_base64" => encoded} = params)
       when is_binary(path) and is_binary(encoded) do
     with {:ok, content} <- decode_content(encoded),
          {:ok, result} <- dispatch_ingest(path, content, params) do
-      conn |> put_status(202) |> json(%{source: result.source, jobs: result.jobs})
+      created? = Map.get(result, :created, true)
+      status = if created?, do: 202, else: 200
+
+      conn
+      |> put_status(status)
+      |> json(%{source: result.source, jobs: result.jobs, created: created?})
     else
-      {:error, :invalid_base64} -> json_error(conn, 400, "content_base64 is not valid base64")
-      {:error, :too_large} -> json_error(conn, 413, "file exceeds #{@max_upload_bytes} bytes")
-      {:error, :path_traversal} -> json_error(conn, 400, "invalid path")
-      {:error, :unknown_volume} -> json_error(conn, 400, "unknown volume")
-      {:error, reason} -> json_error(conn, 502, "ingestion failed: #{inspect(reason)}")
+      {:error, :invalid_base64} ->
+        json_error(conn, 400, "content_base64 is not valid base64")
+
+      {:error, :too_large} ->
+        json_error(conn, 413, "file exceeds #{@max_upload_bytes} bytes")
+
+      {:error, :path_traversal} ->
+        json_error(conn, 400, "invalid path")
+
+      {:error, :unknown_volume} ->
+        json_error(conn, 400, "unknown volume")
+
+      {:error, :file_conflict} ->
+        json_error(conn, 409, "file already exists with different content")
+
+      {:error, reason} ->
+        json_error(conn, 502, "ingestion failed: #{inspect(reason)}")
     end
   end
 
@@ -56,10 +75,10 @@ defmodule ZaqWeb.ChatDocumentsController do
   @doc """
   Removes a pushed document (file + Document row + chunks) from a volume.
 
-  Exists so a caller that writes several related files can undo a partial
-  sequence — e.g. a council PV push that lands the `.md` sidecar and then fails
-  on the `.pdf` would otherwise strand a private, un-ingested orphan with no
-  prune path. Idempotent: deleting an absent path is a 204, not a 404.
+  This is an explicit administrative operation. Callers coordinating related
+  uploads must not use it as automatic failure compensation unless they can
+  prove no concurrent attempt depends on the file. Idempotent: deleting an
+  absent path is a 204, not a 404.
   """
   def delete(conn, %{"path" => path} = params) when is_binary(path) do
     case dispatch_delete(path, params) do
@@ -75,7 +94,7 @@ defmodule ZaqWeb.ChatDocumentsController do
   defp dispatch_delete(path, params) do
     %{path: path, volume: params["volume"]}
     |> Zaq.Event.new(:ingestion, opts: [action: :delete_chat_document])
-    |> Zaq.NodeRouter.dispatch()
+    |> chat_documents_node_router_module().dispatch()
     |> Map.fetch!(:response)
     |> case do
       {:ok, result} -> {:ok, result}
@@ -101,12 +120,13 @@ defmodule ZaqWeb.ChatDocumentsController do
       # "false" as true and ingest against the caller's explicit opt-out. Coerce
       # in the safe direction, like `public` above.
       ingest: params["ingest"] not in [false, "false"],
+      create_only: params["create_only"] == true,
       volume: params["volume"]
     }
 
     attrs
     |> Zaq.Event.new(:ingestion, opts: [action: :ingest_chat_document])
-    |> Zaq.NodeRouter.dispatch()
+    |> chat_documents_node_router_module().dispatch()
     |> Map.fetch!(:response)
     |> case do
       {:ok, result} -> {:ok, result}
@@ -114,6 +134,9 @@ defmodule ZaqWeb.ChatDocumentsController do
       other -> {:error, {:invalid_ingest_response, other}}
     end
   end
+
+  defp chat_documents_node_router_module,
+    do: Zaq.Config.get(:zaq, :chat_documents_node_router_module, Zaq.NodeRouter)
 
   def file(conn, %{"id" => id}) do
     with document when not is_nil(document) <- Ingestion.get_public_chat_document(id),

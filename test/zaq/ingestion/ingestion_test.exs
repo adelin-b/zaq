@@ -28,6 +28,14 @@ defmodule Zaq.IngestionTest do
   alias Zaq.Repo
   alias Zaq.SystemConfigFixtures
 
+  defmodule RejectingIngestionOban do
+    def insert(_changeset), do: {:error, :forced_retry_enqueue_failure}
+  end
+
+  defmodule ExitingIngestionOban do
+    def insert(_changeset), do: exit(:forced_retry_enqueue_exit)
+  end
+
   defmodule ExternalDataSourceBridgeStub do
     def download_document(provider, params) do
       send(self(), {:download_document, provider, params})
@@ -1062,6 +1070,42 @@ defmodule Zaq.IngestionTest do
       assert retried.status == "pending"
       assert retried.error == nil
       assert_receive {:job_updated, %{id: ^job_id, status: "pending", error: nil}}
+    end
+
+    test "reports retry enqueue failure and settles the job back to failed" do
+      previous_oban = Application.get_env(:zaq, :ingestion_oban_module)
+      Application.put_env(:zaq, :ingestion_oban_module, RejectingIngestionOban)
+
+      on_exit(fn ->
+        if previous_oban,
+          do: Application.put_env(:zaq, :ingestion_oban_module, previous_oban),
+          else: Application.delete_env(:zaq, :ingestion_oban_module)
+      end)
+
+      job = create_job(%{status: "failed", error: "previous failure"})
+
+      assert {:error, :enqueue_failed} = Ingestion.retry_job(job.id)
+
+      assert %{status: "failed", error: "Failed to enqueue ingestion job."} =
+               Repo.get!(IngestJob, job.id)
+    end
+
+    test "reports retry enqueue exit and settles the job back to failed" do
+      previous_oban = Application.get_env(:zaq, :ingestion_oban_module)
+      Application.put_env(:zaq, :ingestion_oban_module, ExitingIngestionOban)
+
+      on_exit(fn ->
+        if previous_oban,
+          do: Application.put_env(:zaq, :ingestion_oban_module, previous_oban),
+          else: Application.delete_env(:zaq, :ingestion_oban_module)
+      end)
+
+      job = create_job(%{status: "failed", error: "previous failure"})
+
+      assert {:error, :enqueue_failed} = Ingestion.retry_job(job.id)
+
+      assert %{status: "failed", error: "Failed to enqueue ingestion job."} =
+               Repo.get!(IngestJob, job.id)
     end
 
     test "returns error if job is not failed" do

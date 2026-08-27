@@ -774,9 +774,12 @@ defmodule Zaq.Ingestion do
   `:volume` (defaults to `"default"`, the synthesized single-volume name),
   `:ingest` (default true — pass false to only write the file, e.g. a `.md`
   companion that the source document's ingestion picks up as its sidecar and
-  must not become a standalone public document).
+  must not become a standalone public document), and `:create_only` (default
+  false — atomically publish new content, accept identical existing bytes with
+  `created: false`, and reject different existing bytes with `:file_conflict`).
 
-  Returns `{:ok, %{source: source, jobs: jobs}}` or `{:error, reason}`.
+  Returns `{:ok, %{source: source, jobs: jobs, created: boolean}}` or
+  `{:error, reason}`.
   """
   def ingest_chat_document(%{path: rel_path, content: content} = attrs)
       when is_binary(rel_path) and is_binary(content) do
@@ -785,10 +788,63 @@ defmodule Zaq.Ingestion do
 
     with {:ok, abs_path} <- FileExplorer.resolve_path(volume, rel_path),
          :ok <- File.mkdir_p(Path.dirname(abs_path)),
-         :ok <- File.write(abs_path, content),
-         :ok <- maybe_set_folder_public(attrs, volume, rel_path),
-         {:ok, jobs} <- maybe_ingest(attrs, rel_path, volume) do
-      {:ok, %{source: SourcePath.build_source(volume, rel_path), jobs: length(List.wrap(jobs))}}
+         {:ok, created?} <- write_chat_document(abs_path, content, attrs),
+         {:ok, jobs} <- finish_chat_document_push(created?, attrs, rel_path, volume) do
+      {:ok,
+       %{
+         source: SourcePath.build_source(volume, rel_path),
+         jobs: length(List.wrap(jobs)),
+         created: created?
+       }}
+    end
+  end
+
+  defp write_chat_document(path, content, %{create_only: true}) do
+    temporary_path = create_only_temporary_path(path)
+
+    try do
+      case File.write(temporary_path, content, [:exclusive]) do
+        :ok -> publish_create_only_file(temporary_path, path, content)
+        {:error, _reason} -> {:error, :file_write_failed}
+      end
+    after
+      _ = File.rm(temporary_path)
+    end
+  end
+
+  defp write_chat_document(path, content, _attrs) do
+    case File.write(path, content) do
+      :ok -> {:ok, true}
+      {:error, _reason} -> {:error, :file_write_failed}
+    end
+  end
+
+  defp create_only_temporary_path(path) do
+    basename = ".#{Path.basename(path)}.zaq-upload-#{Ecto.UUID.generate()}.tmp"
+    Path.join(Path.dirname(path), basename)
+  end
+
+  defp publish_create_only_file(temporary_path, path, content) do
+    case File.ln(temporary_path, path) do
+      :ok -> {:ok, true}
+      {:error, :eexist} -> compare_existing_chat_document(path, content)
+      {:error, _reason} -> {:error, :file_write_failed}
+    end
+  end
+
+  defp compare_existing_chat_document(path, content) do
+    case File.read(path) do
+      {:ok, ^content} -> {:ok, false}
+      {:ok, _different_content} -> {:error, :file_conflict}
+      {:error, _reason} -> {:error, :file_write_failed}
+    end
+  end
+
+  defp finish_chat_document_push(false, _attrs, _rel_path, _volume), do: {:ok, []}
+
+  defp finish_chat_document_push(true, attrs, rel_path, volume) do
+    with :ok <- maybe_set_folder_public(attrs, volume, rel_path) do
+      maybe_ingest(attrs, rel_path, volume)
     end
   end
 
@@ -802,21 +858,39 @@ defmodule Zaq.Ingestion do
   def delete_chat_document(%{path: rel_path} = attrs) when is_binary(rel_path) do
     volume = Map.get(attrs, :volume) || "default"
     rel_path = SourcePath.normalize_relative(rel_path)
+    source = SourcePath.build_source(volume, rel_path)
 
-    with {:ok, abs_path} <- FileExplorer.resolve_path(volume, rel_path) do
-      source = SourcePath.build_source(volume, rel_path)
-      _ = File.rm(abs_path)
-
-      case Document.get_by_source(source) do
-        nil -> :ok
-        document -> Document.delete(document)
-      end
-
+    with {:ok, abs_path} <- FileExplorer.resolve_path(volume, rel_path),
+         :ok <- remove_chat_document_file(abs_path),
+         :ok <- delete_chat_document_row(source) do
       {:ok, %{source: source}}
     end
   end
 
   def delete_chat_document(_attrs), do: {:error, :invalid_request}
+
+  defp remove_chat_document_file(path) do
+    case File.rm(path) do
+      :ok -> :ok
+      {:error, :enoent} -> :ok
+      {:error, _reason} -> {:error, :file_delete_failed}
+    end
+  end
+
+  defp delete_chat_document_row(source) do
+    module = ingestion_document_module()
+
+    case module.get_by_source(source) do
+      nil -> :ok
+      document -> normalize_document_delete(module.delete(document))
+    end
+  end
+
+  defp normalize_document_delete({:ok, _document}), do: :ok
+  defp normalize_document_delete({:error, _reason}), do: {:error, :document_delete_failed}
+
+  defp ingestion_document_module,
+    do: Zaq.Config.get(:zaq, :ingestion_document_module, Document)
 
   defp maybe_ingest(attrs, rel_path, volume) do
     if Map.get(attrs, :ingest, true) do
@@ -940,11 +1014,7 @@ defmodule Zaq.Ingestion do
           %{"job_id" => updated_job.id}
         end
 
-      retry_args
-      |> IngestWorker.new()
-      |> Oban.insert()
-
-      {:ok, updated_job}
+      enqueue_ingest_job(updated_job, retry_args)
     else
       {:error, :not_retryable} -> {:error, :not_failed}
       nil -> {:error, :not_found}
@@ -1344,17 +1414,49 @@ defmodule Zaq.Ingestion do
   defp run_job(job, mode) do
     case mode do
       :async ->
-        %{"job_id" => job.id}
-        |> IngestWorker.new()
-        |> Oban.insert()
-
-        {:ok, job}
+        enqueue_ingest_job(job, %{"job_id" => job.id})
 
       :inline ->
         IngestWorker.perform(%Oban.Job{args: %{"job_id" => job.id}})
         {:ok, Repo.get!(IngestJob, job.id)}
     end
   end
+
+  defp enqueue_ingest_job(job, args) do
+    case insert_ingest_job(args) do
+      {:ok, _oban_job} -> {:ok, job}
+      {:error, _reason} -> settle_enqueue_failure(job)
+    end
+  end
+
+  defp insert_ingest_job(args) do
+    try do
+      args
+      |> IngestWorker.new()
+      |> ingestion_oban_module().insert()
+    rescue
+      _exception -> {:error, :enqueue_exception}
+    catch
+      :exit, _reason -> {:error, :enqueue_exit}
+    end
+  end
+
+  defp settle_enqueue_failure(job) do
+    case JobLifecycle.mark_failed(job, "Failed to enqueue ingestion job.", completed: true) do
+      {:ok, _failed_job} -> {:error, :enqueue_failed}
+      {:error, _reason} -> delete_unsettled_enqueue_job(job)
+    end
+  end
+
+  defp delete_unsettled_enqueue_job(job) do
+    case Repo.delete(job) do
+      {:ok, _deleted_job} -> {:error, :enqueue_failed}
+      {:error, _reason} -> {:error, :enqueue_settlement_failed}
+    end
+  end
+
+  defp ingestion_oban_module,
+    do: Zaq.Config.get(:zaq, :ingestion_oban_module, Oban)
 
   defp normalize_mode(:inline), do: :inline
   defp normalize_mode("inline"), do: :inline
