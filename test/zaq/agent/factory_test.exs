@@ -66,6 +66,10 @@ defmodule Zaq.Agent.FactoryTest do
     refute Keyword.has_key?(Factory.strategy_opts(), :model)
   end
 
+  test "declares a no-op route for tool-started signals" do
+    assert {"ai.tool.started", Jido.Actions.Control.Noop} in Factory.signal_routes(%{})
+  end
+
   test "declares MCP runtime plugins and actions" do
     plugins = Factory.plugins()
     actions = Factory.actions()

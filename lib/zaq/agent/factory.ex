@@ -36,6 +36,7 @@ defmodule Zaq.Agent.Factory do
     name: "agent_factory",
     description: "Runtime-configured standard ZAQ agent",
     request_policy: :reject,
+    signal_routes: [{"ai.tool.started", Jido.Actions.Control.Noop}],
     plugins: [
       {Jido.MCP.Plugins.MCP, %{allowed_endpoints: :all}},
       Jido.MCP.JidoAI.Plugins.MCPAI
