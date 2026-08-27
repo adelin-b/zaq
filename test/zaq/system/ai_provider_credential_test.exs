@@ -249,6 +249,46 @@ defmodule Zaq.System.AIProviderCredentialTest do
     assert %AIProviderCredential{id: ^id} = System.get_ai_provider_credential!(id)
   end
 
+  test "cannot update credential protected by an active embedding migration" do
+    assert {:ok, credential} =
+             System.create_ai_provider_credential(%{
+               name: "Migration Target",
+               provider: "custom",
+               endpoint: "https://embedding.example/v1"
+             })
+
+    System.set_config("embedding.shadow_migration.manifest.credential_id", credential.id)
+    Repo.query!("CREATE TABLE chunks_embedding_shadow (id bigint)", [])
+
+    assert {:error, %Ecto.Changeset{} = changeset} =
+             System.update_ai_provider_credential(credential, %{
+               endpoint: "https://changed.example/v1"
+             })
+
+    assert "cannot modify credential used by active embedding migration" in errors_on(changeset).base
+
+    assert System.get_ai_provider_credential!(credential.id).endpoint ==
+             "https://embedding.example/v1"
+  end
+
+  test "cannot delete rollback credential protected by an active embedding migration" do
+    assert {:ok, credential} =
+             System.create_ai_provider_credential(%{
+               name: "Rollback Credential",
+               provider: "custom",
+               endpoint: "https://old-embedding.example/v1"
+             })
+
+    System.set_config("embedding.shadow_migration.old_credential_id", credential.id)
+    Repo.query!("CREATE TABLE chunks_embedding_rollback (id bigint)", [])
+
+    assert {:error, %Ecto.Changeset{} = changeset} =
+             System.delete_ai_provider_credential(credential)
+
+    assert "cannot modify credential used by active embedding migration" in errors_on(changeset).base
+    assert %AIProviderCredential{} = System.get_ai_provider_credential!(credential.id)
+  end
+
   defp create_connect_token_credential(provider) do
     unique = :erlang.unique_integer([:positive])
 

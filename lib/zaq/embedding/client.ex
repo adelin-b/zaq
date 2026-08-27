@@ -26,12 +26,15 @@ defmodule Zaq.Embedding.Client do
 
   require Logger
 
+  @unix_epoch_floor 1_000_000_000
+
   @doc """
   Generates an embedding vector for the given text.
 
   ## Options
 
-    * `:model` — override the configured model for this call
+    * `:config` — use an explicit embedding config for this call
+    * `:model` — override the selected config's model for this call
 
   ## Examples
 
@@ -43,49 +46,38 @@ defmodule Zaq.Embedding.Client do
   """
   @spec embed(String.t(), keyword()) :: {:ok, [float()]} | {:error, term()}
   def embed(text, opts \\ []) when is_binary(text) do
-    cfg = Zaq.System.get_embedding_config()
-    model = Keyword.get(opts, :model, cfg.model)
-    url = cfg.endpoint <> "/embeddings"
+    case request_embeddings(text, opts) do
+      {:ok, %{"data" => data}} ->
+        validate_scalar_response(data)
 
-    headers =
-      if cfg.api_key != nil and cfg.api_key != "" do
-        [{"authorization", "Bearer #{cfg.api_key}"}]
-      else
-        []
+      {:ok, _response_body} ->
+        {:error, :invalid_embedding_response}
+
+      {:error, _reason} = error ->
+        error
+    end
+  end
+
+  @doc """
+  Generates embeddings for a non-empty batch of texts in one request.
+
+  Response items are validated and reordered by their OpenAI-compatible
+  `index` field before vectors are returned.
+  """
+  @spec embed_many([String.t()], keyword()) :: {:ok, [[float()]]} | {:error, term()}
+  def embed_many(texts, opts \\ [])
+
+  def embed_many([], _opts), do: {:error, "Embedding batch must not be empty"}
+
+  def embed_many(texts, opts) when is_list(texts) do
+    if Enum.all?(texts, &is_binary/1) do
+      case request_embeddings(texts, opts) do
+        {:ok, %{"data" => data}} -> validate_batch_response(data, length(texts))
+        {:ok, _response_body} -> invalid_embedding_response()
+        {:error, _reason} = error -> error
       end
-
-    body = %{
-      model: model,
-      input: text
-    }
-
-    req_opts =
-      [url: url, json: body, headers: headers, receive_timeout: 60_000]
-      |> Keyword.merge(req_options())
-
-    case Req.post(req_opts) do
-      {:ok, %Req.Response{status: 200, body: %{"data" => [%{"embedding" => embedding} | _]}}} ->
-        {:ok, embedding}
-
-      {:ok, %Req.Response{status: 200, body: response_body}} ->
-        {:error, "Unexpected response format: #{inspect(response_body)}"}
-
-      {:ok, %Req.Response{status: 429, headers: response_headers, body: response_body}} ->
-        delay_seconds = rate_limit_delay_seconds(response_headers)
-
-        Logger.warning(
-          "Embedding API rate limited (429). Retrying in #{delay_seconds}s. Body: #{inspect(response_body)}"
-        )
-
-        {:error, {:rate_limited, delay_seconds, %{status: 429, body: response_body}}}
-
-      {:ok, %Req.Response{status: status, body: response_body}} ->
-        Logger.error("Embedding API error (#{status}): #{inspect(response_body)}")
-        {:error, "API error (#{status}): #{inspect(response_body)}"}
-
-      {:error, reason} ->
-        Logger.error("Embedding HTTP request failed: #{inspect(reason)}")
-        {:error, "HTTP request failed: #{inspect(reason)}"}
+    else
+      {:error, "Embedding batch inputs must be strings"}
     end
   end
 
@@ -107,46 +99,147 @@ defmodule Zaq.Embedding.Client do
 
   # -- Private --
 
-  defp rate_limit_delay_seconds(headers) do
-    with nil <- header_value(headers, "retry-after"),
-         nil <- header_value(headers, "ratelimit-reset"),
-         nil <- header_value(headers, "x-ratelimit-reset") do
-      60
-    else
-      value when is_binary(value) ->
-        parse_rate_limit_delay(value)
+  defp request_embeddings(input, opts) do
+    cfg = Keyword.get_lazy(opts, :config, &Zaq.System.get_embedding_config/0)
+    model = Keyword.get(opts, :model, cfg.model)
+
+    case embedding_url(cfg.endpoint) do
+      {:ok, url} ->
+        headers =
+          if cfg.api_key != nil and cfg.api_key != "" do
+            [{"authorization", "Bearer #{cfg.api_key}"}]
+          else
+            []
+          end
+
+        req_opts =
+          [
+            url: url,
+            json: %{model: model, input: input},
+            headers: headers,
+            receive_timeout: 60_000
+          ]
+          |> Keyword.merge(req_options())
+
+        case Req.post(req_opts) do
+          {:ok, %Req.Response{status: 200, body: response_body}} ->
+            {:ok, response_body}
+
+          {:ok, %Req.Response{status: 429, headers: response_headers}} ->
+            delay_seconds = rate_limit_delay_seconds(response_headers)
+            Logger.warning("Embedding API rate limited (429). Retrying in #{delay_seconds}s")
+            {:error, {:rate_limited, delay_seconds, %{status: 429}}}
+
+          {:ok, %Req.Response{status: status}} ->
+            Logger.error("Embedding API request failed with status #{status}")
+            {:error, {:embedding_http_error, status}}
+
+          {:error, _reason} ->
+            embedding_transport_error()
+        end
+
+      :error ->
+        embedding_transport_error()
     end
+  end
+
+  defp embedding_url(endpoint) when is_binary(endpoint) do
+    normalized_endpoint = endpoint |> String.trim() |> String.trim_trailing("/")
+    uri = URI.parse(normalized_endpoint)
+
+    if uri.scheme in ["http", "https"] and is_binary(uri.host) and uri.host != "" do
+      {:ok, normalized_endpoint <> "/embeddings"}
+    else
+      :error
+    end
+  end
+
+  defp embedding_url(_endpoint), do: :error
+
+  defp embedding_transport_error do
+    Logger.error("Embedding HTTP transport failed")
+    {:error, :embedding_transport_error}
+  end
+
+  defp validate_scalar_response([%{"embedding" => embedding} = item]) do
+    if Map.get(item, "index") in [nil, 0] and valid_embedding?(embedding) do
+      {:ok, embedding}
+    else
+      invalid_embedding_response()
+    end
+  end
+
+  defp validate_scalar_response(_data), do: invalid_embedding_response()
+
+  defp validate_batch_response(data, expected_count) when is_list(data) do
+    expected_indices = Enum.to_list(0..(expected_count - 1))
+
+    with true <- length(data) == expected_count,
+         true <- Enum.all?(data, &valid_batch_item?/1),
+         true <- Enum.sort(Enum.map(data, & &1["index"])) == expected_indices do
+      embeddings =
+        data
+        |> Enum.sort_by(& &1["index"])
+        |> Enum.map(& &1["embedding"])
+
+      {:ok, embeddings}
+    else
+      _ -> invalid_embedding_response()
+    end
+  end
+
+  defp validate_batch_response(_data, _expected_count), do: invalid_embedding_response()
+
+  defp valid_batch_item?(%{"index" => index, "embedding" => embedding})
+       when is_integer(index),
+       do: valid_embedding?(embedding)
+
+  defp valid_batch_item?(_item), do: false
+
+  defp valid_embedding?(embedding) when is_list(embedding) and embedding != [],
+    do: Enum.all?(embedding, &is_number/1)
+
+  defp valid_embedding?(_embedding), do: false
+
+  defp invalid_embedding_response, do: {:error, :invalid_embedding_response}
+
+  defp rate_limit_delay_seconds(headers) do
+    ["retry-after", "ratelimit-reset", "x-ratelimit-reset"]
+    |> Enum.find_value(60, fn key ->
+      with value when is_binary(value) <- header_value(headers, key),
+           {:ok, delay_seconds} <- parse_rate_limit_delay(value) do
+        delay_seconds
+      else
+        _ -> nil
+      end
+    end)
   end
 
   defp parse_rate_limit_delay(value) do
     trimmed = String.trim(value)
 
     case Integer.parse(trimmed) do
-      {parsed, ""} when parsed >= 0 ->
-        normalize_delay_seconds(parsed)
-
-      _ ->
-        parse_http_date_delay(trimmed)
+      {parsed, ""} when parsed >= 0 -> {:ok, normalize_delay_seconds(parsed)}
+      {_parsed, ""} -> :error
+      _ -> parse_http_date_delay(trimmed)
     end
   end
 
-  defp normalize_delay_seconds(parsed) do
-    now = DateTime.utc_now() |> DateTime.to_unix()
-
-    if parsed > now do
-      max(parsed - now, 0)
-    else
-      parsed
-    end
+  defp normalize_delay_seconds(parsed) when parsed >= @unix_epoch_floor do
+    max(parsed - (DateTime.utc_now() |> DateTime.to_unix()), 0)
   end
+
+  defp normalize_delay_seconds(parsed), do: parsed
+
+  defp parse_http_date_delay(""), do: :error
 
   defp parse_http_date_delay(value) do
-    case :httpd_util.convert_request_date(String.to_charlist(value)) do
+    case convert_request_date(value) do
       {:error, _reason} ->
-        60
+        :error
 
       :bad_date ->
-        60
+        :error
 
       datetime_tuple ->
         delay_seconds =
@@ -155,8 +248,14 @@ defmodule Zaq.Embedding.Client do
           |> Kernel.-(:calendar.datetime_to_gregorian_seconds({{1970, 1, 1}, {0, 0, 0}}))
           |> Kernel.-(DateTime.utc_now() |> DateTime.to_unix())
 
-        max(delay_seconds, 0)
+        {:ok, max(delay_seconds, 0)}
     end
+  end
+
+  defp convert_request_date(value) do
+    :httpd_util.convert_request_date(String.to_charlist(value))
+  rescue
+    FunctionClauseError -> :bad_date
   end
 
   defp header_value(headers, key) when is_map(headers) do

@@ -1,8 +1,9 @@
 defmodule Zaq.SystemTest do
   use Zaq.DataCase, async: false
 
+  alias Zaq.Embedding.ShadowMigration
   alias Zaq.Engine.Telemetry.Collector
-  alias Zaq.Ingestion.Chunk
+  alias Zaq.Ingestion.{Chunk, Document}
   alias Zaq.Repo
   alias Zaq.System
   alias Zaq.System.{EmbeddingConfig, ImageToTextConfig, LLMConfig, TelemetryConfig}
@@ -486,6 +487,89 @@ defmodule Zaq.SystemTest do
       assert saved.dimension == 1536
       assert System.get_config("embedding.model") == "text-embedding-ada-002"
     end
+
+    test "refuses model changes during a shadow migration without losing content" do
+      credential = SystemConfigFixtures.ai_credential_fixture()
+
+      initial_changeset =
+        EmbeddingConfig.changeset(%EmbeddingConfig{}, %{
+          credential_id: credential.id,
+          model: "initial-model",
+          dimension: "768"
+        })
+
+      assert {:ok, _} = System.save_embedding_config(initial_changeset)
+
+      {:ok, document} =
+        Document.create(%{
+          source: "embedding-migration-guard.md",
+          content: "Content that must survive"
+        })
+
+      vector = Pgvector.HalfVector.new(List.duplicate(0.1, 768))
+
+      %Postgrex.Result{rows: [[chunk_id]]} =
+        Repo.query!(
+          """
+          INSERT INTO chunks
+            (document_id, content, chunk_index, embedding, inserted_at, updated_at)
+          VALUES ($1, 'Chunk that must survive', 0, $2::halfvec, NOW(), NOW())
+          RETURNING id
+          """,
+          [document.id, vector]
+        )
+
+      assert :ok = ShadowMigration.prepare(1536)
+
+      changed_changeset =
+        EmbeddingConfig.changeset(%EmbeddingConfig{}, %{
+          credential_id: credential.id,
+          model: "changed-model",
+          dimension: "1536"
+        })
+
+      assert {:error, :embedding_migration_in_progress} =
+               System.save_embedding_config(changed_changeset)
+
+      assert System.get_config("embedding.model") == "initial-model"
+      assert Repo.get!(Document, document.id).content == "Content that must survive"
+
+      assert %Postgrex.Result{rows: [["Chunk that must survive"]]} =
+               Repo.query!("SELECT content FROM chunks WHERE id = $1", [chunk_id])
+    end
+
+    test "waits for the shared migration lock before reading or changing config" do
+      credential = SystemConfigFixtures.ai_credential_fixture()
+
+      changeset =
+        EmbeddingConfig.changeset(%EmbeddingConfig{}, %{
+          credential_id: credential.id,
+          model: "lock-test-model",
+          dimension: "768"
+        })
+
+      {:ok, connection} = Postgrex.start_link(direct_postgrex_options())
+      Postgrex.query!(connection, "BEGIN", [])
+      Postgrex.query!(connection, "SELECT pg_advisory_xact_lock($1)", [7_190_977_496_160_145_225])
+
+      caller = self()
+
+      save_pid =
+        spawn(fn ->
+          send(caller, {:embedding_save_result, System.save_embedding_config(changeset)})
+        end)
+
+      refute_receive {:embedding_save_result, _result}, 100
+
+      Postgrex.query!(connection, "COMMIT", [])
+
+      assert_receive {:embedding_save_result, {:ok, saved}}, 1_000
+      assert saved.model == "lock-test-model"
+      assert System.get_config("embedding.model") == "lock-test-model"
+
+      Process.exit(save_pid, :normal)
+      GenServer.stop(connection)
+    end
   end
 
   describe "embedding_ready?/0" do
@@ -588,6 +672,19 @@ defmodule Zaq.SystemTest do
       assert {:error, %Ecto.Changeset{valid?: false}} =
                System.save_image_to_text_config(changeset)
     end
+  end
+
+  defp direct_postgrex_options do
+    Keyword.take(Repo.config(), [
+      :hostname,
+      :port,
+      :username,
+      :password,
+      :database,
+      :socket_dir,
+      :ssl,
+      :ssl_opts
+    ])
   end
 
   describe "get_telemetry_config/0" do

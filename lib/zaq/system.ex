@@ -7,6 +7,7 @@ defmodule Zaq.System do
 
   import Ecto.Query
 
+  alias Zaq.Embedding.MigrationLock
   alias Zaq.Engine.Connect
   alias Zaq.Engine.IncomingMessageRouting
   alias Zaq.Engine.Telemetry.Collector
@@ -39,6 +40,13 @@ defmodule Zaq.System do
   @global_base_url_key "system.global.base_url"
   @system_language_key "system.global.language"
   @system_timezone_key "system.global.timezone"
+  @embedding_migration_credential_keys [
+    "embedding.credential_id",
+    "embedding.shadow_migration.manifest.credential_id",
+    "embedding.shadow_migration.old_credential_id",
+    "embedding.shadow_migration.target_credential_id"
+  ]
+
   # ── Generic key/value ─────────────────────────────────────────────────
 
   @doc "Returns the stored value for `key`, or `nil`."
@@ -269,9 +277,7 @@ defmodule Zaq.System do
   @doc "Persists Embedding settings from a validated `%EmbeddingConfig{}` changeset."
   def save_embedding_config(%Ecto.Changeset{valid?: true} = changeset) do
     new_config = Ecto.Changeset.apply_changes(changeset)
-    saved_model = get_config("embedding.model")
-
-    multi = build_embedding_multi(new_config, :skip, saved_model)
+    multi = build_embedding_multi(new_config, :skip)
 
     case Repo.transaction(multi) do
       {:ok, _} -> {:ok, get_embedding_config()}
@@ -380,25 +386,61 @@ defmodule Zaq.System do
   def update_ai_provider_credential(%AIProviderCredential{} = credential, attrs) do
     attrs = maybe_drop_blank_api_key(attrs)
 
-    credential
-    |> AIProviderCredential.changeset(attrs)
-    |> save_ai_provider_credential(:update)
+    with_ai_provider_credential_mutation_lock(fn ->
+      with :ok <- ensure_embedding_migration_credential_mutable(credential) do
+        credential
+        |> AIProviderCredential.changeset(attrs)
+        |> save_ai_provider_credential(:update)
+      end
+    end)
   end
 
   @doc "Deletes an AI provider credential unless referenced by system configs."
   def delete_ai_provider_credential(%AIProviderCredential{} = credential) do
-    case credential_usage_keys(credential.id) do
-      [] ->
-        Repo.delete(credential)
+    with_ai_provider_credential_mutation_lock(fn ->
+      with :ok <- ensure_embedding_migration_credential_mutable(credential) do
+        case credential_usage_keys(credential.id) do
+          [] ->
+            Repo.delete(credential)
 
-      _in_use_keys ->
-        {:error,
-         Ecto.Changeset.add_error(
-           Ecto.Changeset.change(credential),
-           :base,
-           "cannot delete credential currently used by system configuration"
-         )}
+          _in_use_keys ->
+            {:error,
+             Ecto.Changeset.add_error(
+               Ecto.Changeset.change(credential),
+               :base,
+               "cannot delete credential currently used by system configuration"
+             )}
+        end
+      end
+    end)
+  end
+
+  defp with_ai_provider_credential_mutation_lock(fun) do
+    case Repo.transaction(fn ->
+           :ok = MigrationLock.acquire!()
+           fun.()
+         end) do
+      {:ok, result} -> result
+      {:error, reason} -> {:error, reason}
     end
+  end
+
+  defp ensure_embedding_migration_credential_mutable(credential) do
+    if MigrationLock.migration_relation_present?() and
+         credential.id |> to_string() |> embedding_migration_credential_id?() do
+      {:error,
+       Ecto.Changeset.add_error(
+         Ecto.Changeset.change(credential),
+         :base,
+         "cannot modify credential used by active embedding migration"
+       )}
+    else
+      :ok
+    end
+  end
+
+  defp embedding_migration_credential_id?(id_value) do
+    Enum.any?(@embedding_migration_credential_keys, &(get_config(&1) == id_value))
   end
 
   defp save_ai_provider_credential(%Ecto.Changeset{} = changeset, operation) do
@@ -458,7 +500,8 @@ defmodule Zaq.System do
   defp credential_usage_keys(id) do
     id_value = to_string(id)
 
-    ["llm.credential_id", "embedding.credential_id", "image_to_text.credential_id"]
+    (["llm.credential_id", "image_to_text.credential_id"] ++
+       @embedding_migration_credential_keys)
     |> Enum.filter(fn key -> get_config(key) == id_value end)
   end
 
@@ -478,17 +521,34 @@ defmodule Zaq.System do
   defp encrypted_field_value(field, config, _encrypted_api_key),
     do: Map.get(config, String.to_existing_atom(field))
 
-  defp build_embedding_multi(new_config, encrypted_api_key, saved_model) do
+  defp build_embedding_multi(new_config, encrypted_api_key) do
+    multi =
+      Ecto.Multi.new()
+      |> Ecto.Multi.run(:migration_lock, fn _repo, _changes ->
+        :ok = MigrationLock.acquire!()
+        {:ok, :locked}
+      end)
+      |> Ecto.Multi.run(:migration_state, fn _repo, _changes ->
+        if MigrationLock.migration_relation_present?() do
+          {:error, :embedding_migration_in_progress}
+        else
+          {:ok, :clear}
+        end
+      end)
+      |> Ecto.Multi.run(:saved_model, fn _repo, _changes ->
+        {:ok, get_config("embedding.model")}
+      end)
+
     @embedding_write_fields
-    |> Enum.reduce(Ecto.Multi.new(), fn field, multi ->
+    |> Enum.reduce(multi, fn field, multi ->
       value = encrypted_field_value(field, new_config, encrypted_api_key)
 
       Ecto.Multi.run(multi, {:config, field}, fn _repo, _changes ->
         persist_embedding_field(field, value)
       end)
     end)
-    |> Ecto.Multi.run(:table_op, fn _repo, _changes ->
-      embedding_table_op(new_config, saved_model)
+    |> Ecto.Multi.run(:table_op, fn _repo, changes ->
+      embedding_table_op(new_config, changes.saved_model)
     end)
   end
 

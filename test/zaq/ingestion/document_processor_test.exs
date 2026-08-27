@@ -1126,9 +1126,9 @@ defmodule Zaq.Ingestion.DocumentProcessorTest do
   describe "query_extraction/1" do
     test "passes embedding errors through from similarity_search_group_by" do
       stub_embedding_failure()
-      assert {:error, reason} = DocumentProcessor.query_extraction("query")
-      assert is_binary(reason)
-      assert String.contains?(reason, "API error")
+
+      assert {:error, {:embedding_http_error, 500}} =
+               DocumentProcessor.query_extraction("query")
     end
 
     test "returns token-limited results" do

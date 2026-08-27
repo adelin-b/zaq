@@ -1,6 +1,8 @@
 defmodule Zaq.Embedding.ClientTest do
   use Zaq.DataCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Zaq.Embedding.Client
   alias Zaq.SystemConfigFixtures
 
@@ -93,22 +95,120 @@ defmodule Zaq.Embedding.ClientTest do
       assert {:ok, [0.1, 0.2]} = Client.embed("test", model: "custom-model")
     end
 
-    test "returns error on unexpected response format" do
+    test "uses an explicit config without changing stored embedding settings" do
       Req.Test.stub(Client, fn conn ->
-        Req.Test.json(conn, %{"unexpected" => "format"})
+        assert Plug.Conn.get_req_header(conn, "authorization") == ["Bearer shadow-key"]
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(body)["model"] == "shadow-model"
+
+        Req.Test.json(conn, %{
+          "data" => [%{"embedding" => [0.1, 0.2]}]
+        })
       end)
 
-      assert {:error, "Unexpected response format:" <> _} = Client.embed("test")
+      config = %{
+        endpoint: "http://shadow-provider",
+        api_key: "shadow-key",
+        model: "shadow-model"
+      }
+
+      assert {:ok, [0.1, 0.2]} = Client.embed("test", config: config)
+      assert Client.model() == "test-model"
     end
 
-    test "returns error on non-200 status" do
+    test "returns a sanitized error for an explicit endpoint without a URL scheme" do
+      previous_req_options = Application.get_env(:zaq, Client, [])
+      Application.put_env(:zaq, Client, req_options: [])
+
+      on_exit(fn -> Application.put_env(:zaq, Client, previous_req_options) end)
+
+      sensitive_endpoint = "provider-sensitive-host.invalid"
+
+      config = %{
+        endpoint: sensitive_endpoint,
+        api_key: "shadow-key",
+        model: "shadow-model"
+      }
+
+      log =
+        capture_log(fn ->
+          assert {:error, :embedding_transport_error} = Client.embed("test", config: config)
+        end)
+
+      refute log =~ sensitive_endpoint
+    end
+
+    test "rejects malformed scalar embedding data" do
+      malformed_data = [
+        [],
+        [%{"index" => 0, "embedding" => "invalid"}],
+        [%{"index" => 0, "embedding" => []}],
+        [%{"index" => 0, "embedding" => [0.1, "invalid"]}],
+        [%{"index" => 1, "embedding" => [0.1]}],
+        [
+          %{"index" => 0, "embedding" => [0.1]},
+          %{"index" => 1, "embedding" => [0.2]}
+        ]
+      ]
+
+      for data <- malformed_data do
+        Req.Test.stub(Client, fn conn -> Req.Test.json(conn, %{"data" => data}) end)
+        assert {:error, :invalid_embedding_response} = Client.embed("test")
+      end
+    end
+
+    test "returns a sanitized error on unexpected response format" do
+      Req.Test.stub(Client, fn conn ->
+        Req.Test.json(conn, %{"unexpected" => "provider-echoed-input"})
+      end)
+
+      assert {:error, :invalid_embedding_response} = Client.embed("test")
+    end
+
+    test "returns a structured error on non-200 status" do
       Req.Test.stub(Client, fn conn ->
         conn
         |> Plug.Conn.put_status(401)
         |> Req.Test.json(%{"error" => "unauthorized"})
       end)
 
-      assert {:error, "API error (401):" <> _} = Client.embed("test")
+      assert {:error, {:embedding_http_error, 401}} = Client.embed("test")
+    end
+
+    test "does not expose provider response bodies in HTTP errors or logs" do
+      sensitive_marker = "provider-echoed-sensitive-input"
+
+      Req.Test.stub(Client, fn conn ->
+        conn
+        |> Plug.Conn.put_status(503)
+        |> Req.Test.json(%{"error" => sensitive_marker})
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:embedding_http_error, 503}} = Client.embed("request content")
+        end)
+
+      refute log =~ sensitive_marker
+    end
+
+    test "does not expose rate-limit response bodies in errors or logs" do
+      sensitive_marker = "provider-echoed-rate-limit-input"
+
+      Req.Test.stub(Client, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "0")
+        |> Plug.Conn.put_status(429)
+        |> Req.Test.json(%{"error" => sensitive_marker})
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, {:rate_limited, 0, %{status: 429}}} =
+                   Client.embed("request content")
+        end)
+
+      refute log =~ sensitive_marker
     end
 
     test "returns rate_limited error with retry-after delay" do
@@ -181,14 +281,67 @@ defmodule Zaq.Embedding.ClientTest do
     end
 
     test "defaults to 60 seconds when retry-after is invalid" do
+      for invalid_value <- ["not-a-date", "abc", "1.5"] do
+        Req.Test.stub(Client, fn conn ->
+          conn
+          |> Plug.Conn.put_resp_header("retry-after", invalid_value)
+          |> Plug.Conn.put_status(429)
+          |> Req.Test.json(%{"error" => "rate limited"})
+        end)
+
+        assert {:error, {:rate_limited, 60, %{status: 429}}} = Client.embed("test")
+      end
+    end
+
+    test "defaults to 60 seconds when retry-after is negative" do
       Req.Test.stub(Client, fn conn ->
         conn
-        |> Plug.Conn.put_resp_header("retry-after", "not-a-date")
+        |> Plug.Conn.put_resp_header("retry-after", "-1")
         |> Plug.Conn.put_status(429)
         |> Req.Test.json(%{"error" => "rate limited"})
       end)
 
       assert {:error, {:rate_limited, 60, %{status: 429}}} = Client.embed("test")
+    end
+
+    test "defaults to 60 seconds when retry-after is empty" do
+      Req.Test.stub(Client, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "")
+        |> Plug.Conn.put_status(429)
+        |> Req.Test.json(%{"error" => "rate limited"})
+      end)
+
+      assert {:error, {:rate_limited, 60, %{status: 429}}} = Client.embed("test")
+    end
+
+    test "uses reset header when retry-after is malformed" do
+      reset_at = DateTime.utc_now() |> DateTime.to_unix() |> Kernel.+(90)
+
+      Req.Test.stub(Client, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("retry-after", "abc")
+        |> Plug.Conn.put_resp_header("x-ratelimit-reset", Integer.to_string(reset_at))
+        |> Plug.Conn.put_status(429)
+        |> Req.Test.json(%{"error" => "rate limited"})
+      end)
+
+      assert {:error, {:rate_limited, delay_seconds, %{status: 429}}} = Client.embed("test")
+      assert delay_seconds >= 75
+      assert delay_seconds <= 90
+    end
+
+    test "returns 0 delay for a stale reset epoch" do
+      reset_at = DateTime.utc_now() |> DateTime.to_unix() |> Kernel.-(30)
+
+      Req.Test.stub(Client, fn conn ->
+        conn
+        |> Plug.Conn.put_resp_header("x-ratelimit-reset", Integer.to_string(reset_at))
+        |> Plug.Conn.put_status(429)
+        |> Req.Test.json(%{"error" => "rate limited"})
+      end)
+
+      assert {:error, {:rate_limited, 0, %{status: 429}}} = Client.embed("test")
     end
 
     test "returns 0 delay when retry-after HTTP-date is in the past" do
@@ -248,7 +401,22 @@ defmodule Zaq.Embedding.ClientTest do
         dimension: 1536
       })
 
-      assert {:error, "HTTP request failed:" <> _} = Client.embed("test")
+      assert {:error, :embedding_transport_error} = Client.embed("test")
+    end
+
+    test "does not expose raw transport reasons in errors or logs" do
+      sensitive_marker = "transport-sensitive-marker"
+
+      Req.Test.stub(Client, fn conn ->
+        Req.Test.transport_error(conn, {:bad_alpn_protocol, sensitive_marker})
+      end)
+
+      log =
+        capture_log(fn ->
+          assert {:error, :embedding_transport_error} = Client.embed("request content")
+        end)
+
+      refute log =~ sensitive_marker
     end
 
     test "handles rate-limit headers from real HTTP response map" do
@@ -317,6 +485,66 @@ defmodule Zaq.Embedding.ClientTest do
       end)
 
       assert {:ok, [0.1]} = Client.embed("test")
+    end
+  end
+
+  describe "embed_many/2" do
+    test "sends array input and reorders embeddings by response index" do
+      Req.Test.stub(Client, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        decoded = Jason.decode!(body)
+
+        assert decoded["model"] == "shadow-model"
+        assert decoded["input"] == ["first", "second"]
+
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"index" => 1, "embedding" => [2.0]},
+            %{"index" => 0, "embedding" => [1.0]}
+          ]
+        })
+      end)
+
+      config = %{
+        endpoint: "http://shadow-provider",
+        api_key: "shadow-key",
+        model: "shadow-model"
+      }
+
+      assert {:ok, [[1.0], [2.0]]} =
+               Client.embed_many(["first", "second"], config: config)
+    end
+
+    test "rejects duplicate or missing response indices" do
+      Req.Test.stub(Client, fn conn ->
+        Req.Test.json(conn, %{
+          "data" => [
+            %{"index" => 0, "embedding" => [1.0]},
+            %{"index" => 0, "embedding" => [2.0]}
+          ]
+        })
+      end)
+
+      assert {:error, :invalid_embedding_response} =
+               Client.embed_many(["first", "second"])
+    end
+
+    test "rejects non-numeric embedding values" do
+      Req.Test.stub(Client, fn conn ->
+        Req.Test.json(conn, %{
+          "data" => [%{"index" => 0, "embedding" => [1.0, "invalid"]}]
+        })
+      end)
+
+      assert {:error, :invalid_embedding_response} = Client.embed_many(["first"])
+    end
+
+    test "rejects empty input without making an HTTP request" do
+      Req.Test.stub(Client, fn _conn ->
+        flunk("empty batch must not issue an HTTP request")
+      end)
+
+      assert {:error, "Embedding batch must not be empty"} = Client.embed_many([])
     end
   end
 
