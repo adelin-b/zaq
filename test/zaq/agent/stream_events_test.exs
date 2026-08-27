@@ -60,6 +60,123 @@ defmodule Zaq.Agent.StreamEventsTest do
     refute_receive {:broadcast, _, _, _}
   end
 
+  test "orders sequenced runtime events before progressive broadcasts" do
+    events = [
+      event(:llm_delta, 300, %{chunk_type: :content, delta: "second."})
+      |> Map.put(:seq, 3),
+      event(:request_started, 100, %{}) |> Map.put(:seq, 1),
+      event(:llm_delta, 200, %{
+        chunk_type: :content,
+        delta: "First ordered fragment ",
+        model: "openai:gpt-oss-120b"
+      })
+      |> Map.put(:seq, 2),
+      event(:request_completed, 400, %{result: "First ordered fragment second."})
+      |> Map.put(:seq, 4)
+    ]
+
+    assert {:ok, result} =
+             StreamEvents.consume(events, incoming(),
+               status_module: FakeStatus,
+               started_at: 0
+             )
+
+    assert result.answer == "First ordered fragment second."
+    assert_receive {:broadcast, :answering, "First ordered fragment ", :stream_delta}
+    assert_receive {:broadcast, :answering, "First ordered fragment second.", :stream_delta}
+    refute_receive {:broadcast, _, _, _}
+  end
+
+  test "uses only the terminal answer when the request start never arrives" do
+    events = [
+      event(:llm_delta, 300, %{chunk_type: :content, delta: "second."})
+      |> Map.put(:seq, 4),
+      event(:request_completed, 400, %{result: "First ordered fragment second."})
+      |> Map.put(:seq, 5)
+    ]
+
+    assert {:ok, result} =
+             StreamEvents.consume(events, incoming(),
+               status_module: FakeStatus,
+               started_at: 0
+             )
+
+    assert result.answer == "First ordered fragment second."
+    refute_receive {:broadcast, _, _, _}
+  end
+
+  test "uses canonical failure usage when failure overtakes the request start" do
+    events = [
+      event(:llm_delta, 300, %{chunk_type: :content, delta: "incomplete suffix"})
+      |> Map.put(:seq, 4),
+      event(:request_failed, 500, %{
+        error: :worker_crashed,
+        usage: %{input_tokens: 7, output_tokens: 2, total_tokens: 9}
+      })
+      |> Map.put(:seq, 5)
+    ]
+
+    assert {:error, :worker_crashed, result} =
+             StreamEvents.consume(events, incoming(),
+               status_module: FakeStatus,
+               started_at: 0
+             )
+
+    assert result.answer == ""
+    assert result.usage == %{input_tokens: 7, output_tokens: 2, total_tokens: 9}
+    refute_receive {:broadcast, _, _, _}
+  end
+
+  test "preserves completed usage when cancellation overtakes the request start" do
+    events = [
+      event(:llm_delta, 300, %{chunk_type: :content, delta: "incomplete suffix"})
+      |> Map.put(:seq, 4),
+      event(:llm_completed, 400, %{usage: %{input_tokens: 5, output_tokens: 1}})
+      |> Map.put(:seq, 5),
+      event(:request_cancelled, 500, %{reason: "user stopped"}) |> Map.put(:seq, 0)
+    ]
+
+    assert {:ok, result} =
+             StreamEvents.consume(events, incoming(),
+               status_module: FakeStatus,
+               started_at: 0
+             )
+
+    assert result.answer == ""
+    assert result.termination_reason == :cancelled
+    assert result.usage == %{input_tokens: 5, output_tokens: 1, total_tokens: 6}
+    refute_receive {:broadcast, _, _, _}
+  end
+
+  test "discards noncontiguous progressive events when terminal overtakes a gap" do
+    events = [
+      event(:request_started, 100, %{}) |> Map.put(:seq, 1),
+      event(:llm_delta, 200, %{
+        chunk_type: :content,
+        delta: "Ordered progressive prefix. "
+      })
+      |> Map.put(:seq, 2),
+      event(:llm_delta, 300, %{chunk_type: :content, delta: "out-of-order fragment"})
+      |> Map.put(:seq, 4),
+      event(:request_completed, 400, %{
+        result: "Ordered progressive prefix. Recovered terminal ending."
+      })
+      |> Map.put(:seq, 5)
+    ]
+
+    assert {:ok, result} =
+             StreamEvents.consume(events, incoming(),
+               status_module: FakeStatus,
+               started_at: 0
+             )
+
+    assert result.answer == "Ordered progressive prefix. Recovered terminal ending."
+    assert_receive {:broadcast, :answering, "Ordered progressive prefix. ", :stream_delta}
+
+    refute_receive {:broadcast, :answering, "Ordered progressive prefix. out-of-order fragment",
+                    :stream_delta}
+  end
+
   test "uses llm_completed usage when terminal usage is empty" do
     events = [
       event(:llm_completed, 20, %{
@@ -293,6 +410,48 @@ defmodule Zaq.Agent.StreamEventsTest do
   end
 
   describe "terminal events" do
+    test "keeps a synthetic failure whose sequence is stale" do
+      events = [
+        event(:request_started, 100, %{}) |> Map.put(:seq, 1),
+        event(:llm_delta, 200, %{
+          chunk_type: :content,
+          delta: "Ordered partial answer before failure."
+        })
+        |> Map.put(:seq, 2),
+        event(:request_failed, 300, %{error: :worker_crashed}) |> Map.put(:seq, 0)
+      ]
+
+      assert {:error, :worker_crashed, result} =
+               StreamEvents.consume(events, incoming(),
+                 status_module: FakeStatus,
+                 started_at: 0
+               )
+
+      assert result.answer == "Ordered partial answer before failure."
+
+      assert_receive {:broadcast, :answering, "Ordered partial answer before failure.",
+                      :stream_delta}
+    end
+
+    test "keeps a synthetic cancellation whose sequence is stale" do
+      events = [
+        event(:request_started, 100, %{}) |> Map.put(:seq, 1),
+        event(:llm_delta, 200, %{chunk_type: :content, delta: "Partial before cancellation."})
+        |> Map.put(:seq, 2),
+        event(:request_cancelled, 300, %{reason: "user stopped"}) |> Map.put(:seq, 0)
+      ]
+
+      assert {:ok, result} =
+               StreamEvents.consume(events, incoming(),
+                 status_module: FakeStatus,
+                 started_at: 0
+               )
+
+      assert result.answer == "Partial before cancellation."
+      assert result.termination_reason == :cancelled
+      assert_receive {:broadcast, :answering, "Partial before cancellation.", :stream_delta}
+    end
+
     test "returns cancelled result and registers cancellation" do
       incoming = incoming()
 
@@ -475,7 +634,7 @@ defmodule Zaq.Agent.StreamEventsTest do
   defp event(kind, at_ms, data, attrs \\ []) do
     %{
       id: "evt-#{at_ms}",
-      seq: at_ms,
+      seq: nil,
       at_ms: at_ms,
       run_id: "run-1",
       request_id: "req-1",

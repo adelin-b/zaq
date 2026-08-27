@@ -39,20 +39,11 @@ defmodule Zaq.Agent.StreamEvents do
   @spec consume(Enumerable.t(), Incoming.t(), keyword()) ::
           {:ok, result()} | {:error, term(), result()}
   def consume(events, %Incoming{} = incoming, opts \\ []) do
-    state = initial_state(incoming, opts)
-
     final_state =
-      Enum.reduce_while(events, state, fn event, state ->
-        state = handle_event(event, state)
-
-        if terminal_kind?(kind(event)) do
-          {:halt, flush(state, force?: true, now: field(event, :at_ms))}
-        else
-          {:cont, state}
-        end
-      end)
-
-    final_state = flush(final_state, force?: true)
+      events
+      |> Enum.reduce_while(initial_state(incoming, opts), &consume_event/2)
+      |> finalize_pending_events()
+      |> flush(force?: true)
 
     case final_state.error do
       # Return the partial result alongside the error so callers can tell whether
@@ -82,6 +73,9 @@ defmodule Zaq.Agent.StreamEvents do
       current_started_at_ms: nil,
       current_ended_at_ms: nil,
       buffer: "",
+      next_event_seq: nil,
+      pre_anchor_events: [],
+      pending_events: %{},
       turns: %{},
       trace: [],
       trace_artifacts: [],
@@ -92,6 +86,120 @@ defmodule Zaq.Agent.StreamEvents do
       error: nil
     }
     |> register(:running)
+  end
+
+  defp consume_event(event, state) do
+    {ready_events, state} = ordered_events(event, state)
+    consume_ready_events(ready_events, state)
+  end
+
+  defp ordered_events(event, %{next_event_seq: nil} = state) do
+    seq = field(event, :seq)
+
+    cond do
+      kind(event) == :request_started and is_integer(seq) ->
+        activate_sequence_ordering(event, state, seq)
+
+      is_integer(seq) ->
+        {[], Map.update!(state, :pre_anchor_events, &[event | &1])}
+
+      true ->
+        {[event], state}
+    end
+  end
+
+  defp ordered_events(event, state) do
+    case field(event, :seq) do
+      seq when is_integer(seq) -> queue_sequenced_event(event, state)
+      _seq -> {[event], state}
+    end
+  end
+
+  defp activate_sequence_ordering(request_started, state, seq) do
+    events = [request_started | Enum.reverse(state.pre_anchor_events)]
+    state = %{state | next_event_seq: seq, pre_anchor_events: []}
+
+    Enum.reduce(events, {[], state}, fn event, {ready_events, state} ->
+      {new_ready_events, state} = queue_sequenced_event(event, state)
+      {ready_events ++ new_ready_events, state}
+    end)
+  end
+
+  defp queue_sequenced_event(event, state) do
+    seq = field(event, :seq)
+
+    cond do
+      seq >= state.next_event_seq ->
+        state
+        |> Map.update!(:pending_events, &Map.put_new(&1, seq, event))
+        |> drain_pending_events([])
+
+      terminal_kind?(kind(event)) ->
+        # Synthetic failure and cancellation events may use a default stale sequence.
+        {[event], %{state | pending_events: %{}}}
+
+      true ->
+        {[], state}
+    end
+  end
+
+  defp drain_pending_events(state, ready_events) do
+    case Map.pop(state.pending_events, state.next_event_seq) do
+      {nil, _pending_events} ->
+        {Enum.reverse(ready_events), state}
+
+      {event, pending_events} ->
+        state = %{
+          state
+          | next_event_seq: state.next_event_seq + 1,
+            pending_events: pending_events
+        }
+
+        drain_pending_events(state, [event | ready_events])
+    end
+  end
+
+  defp consume_ready_events([], state), do: {:cont, state}
+
+  defp consume_ready_events([event | events], state) do
+    state = handle_event(event, state)
+
+    if terminal_kind?(kind(event)) do
+      {:halt, flush(state, force?: true, now: field(event, :at_ms))}
+    else
+      consume_ready_events(events, state)
+    end
+  end
+
+  defp finalize_pending_events(%{next_event_seq: nil} = state) do
+    events = Enum.reverse(state.pre_anchor_events)
+    terminal_event = Enum.find(events, &terminal_kind?(kind(&1)))
+
+    state =
+      Enum.reduce(events, %{state | pre_anchor_events: []}, fn event, state ->
+        if kind(event) == :llm_completed, do: handle_llm_completed(event, state), else: state
+      end)
+
+    # Without the start anchor, buffered content cannot prove its prefix is complete.
+    if terminal_event, do: handle_event(terminal_event, state), else: state
+  end
+
+  defp finalize_pending_events(%{pending_events: pending_events} = state)
+       when map_size(pending_events) == 0,
+       do: state
+
+  defp finalize_pending_events(state) do
+    terminal_event =
+      state.pending_events
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.find_value(fn {_seq, event} ->
+        if terminal_kind?(kind(event)), do: event
+      end)
+
+    state = %{state | pending_events: %{}}
+
+    # Request.Stream stops at the first terminal event, so a sequence gap cannot be repaired.
+    if terminal_event, do: handle_event(terminal_event, state), else: state
   end
 
   defp handle_event(event, state), do: handle_event(kind(event), event, state)
@@ -342,7 +450,11 @@ defmodule Zaq.Agent.StreamEvents do
   defp handle_request_failed(state, event) do
     data = data(event)
 
-    %{state | error: data_get(data, :error) || data_get(data, :reason) || :request_failed}
+    %{
+      state
+      | error: data_get(data, :error) || data_get(data, :reason) || :request_failed,
+        usage: completed_request_usage(state.usage, data_get(data, :usage))
+    }
     |> register(:failed)
   end
 
