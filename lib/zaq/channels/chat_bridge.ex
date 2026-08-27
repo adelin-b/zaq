@@ -71,6 +71,9 @@ defmodule Zaq.Channels.ChatBridge do
     )
   end
 
+  @impl true
+  def send_typing(_config, _channel_id, _connection_details), do: :ok
+
   @doc "PubSub topic the controller subscribes to for a conversation."
   @spec topic(String.t()) :: String.t()
   def topic(conversation_id), do: "chat:conv:#{conversation_id}"
