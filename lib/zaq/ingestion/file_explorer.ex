@@ -85,16 +85,38 @@ defmodule Zaq.Ingestion.FileExplorer do
     contain(Path.expand(Path.join(base, relative_path)), base)
   end
 
-  # A bare `String.starts_with?/2` compares strings, not path components, so a
-  # sibling directory sharing the root's name prefix passes it: root
-  # `/srv/zaq/data` would admit `/srv/zaq/data_backup/x` (reachable as
-  # `../data_backup/x`). Require an exact match or a `/`-delimited descendant so
-  # containment is a path relation, not a substring one.
+  # Lexical containment blocks `..`; lstat blocks existing symlink components.
+  # Filesystem mutation after this check remains a TOCTOU boundary until Elixir
+  # exposes openat-style no-follow operations for the full create/write flow.
   defp contain(full, root) do
     if full == root or String.starts_with?(full, root <> "/") do
-      {:ok, full}
+      reject_symlink_components(full, root)
     else
       {:error, :path_traversal}
+    end
+  end
+
+  defp reject_symlink_components(root, root), do: {:ok, root}
+
+  defp reject_symlink_components(full, root) do
+    relative = Path.relative_to(full, root)
+
+    case check_components(root, Path.split(relative)) do
+      :ok -> {:ok, full}
+      error -> error
+    end
+  end
+
+  defp check_components(_current, []), do: :ok
+
+  defp check_components(current, [component | rest]) do
+    next = Path.join(current, component)
+
+    case File.lstat(next) do
+      {:ok, %{type: :symlink}} -> {:error, :path_traversal}
+      {:ok, _stat} -> check_components(next, rest)
+      {:error, :enoent} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -312,7 +334,7 @@ defmodule Zaq.Ingestion.FileExplorer do
   # ── Private helpers ──────────────────────────────────────────────
 
   defp deduplicate_path(path) do
-    if File.exists?(path) do
+    if path_taken?(path) do
       dir = Path.dirname(path)
       ext = Path.extname(path)
       stem = path |> Path.basename(ext) |> strip_suffix()
@@ -322,11 +344,19 @@ defmodule Zaq.Ingestion.FileExplorer do
     end
   end
 
+  defp path_taken?(path) do
+    case File.lstat(path) do
+      {:ok, _stat} -> true
+      {:error, :enoent} -> false
+      {:error, _reason} -> true
+    end
+  end
+
   defp strip_suffix(base), do: Regex.replace(~r/\(\d+\)$/, base, "")
 
   defp find_free_path(dir, stem, ext, n) do
     candidate = Path.join(dir, "#{stem}(#{n})#{ext}")
-    if File.exists?(candidate), do: find_free_path(dir, stem, ext, n + 1), else: candidate
+    if path_taken?(candidate), do: find_free_path(dir, stem, ext, n + 1), else: candidate
   end
 
   defp recursive_size(path) do
@@ -337,8 +367,9 @@ defmodule Zaq.Ingestion.FileExplorer do
   end
 
   defp child_size(child) do
-    case File.stat(child) do
+    case File.lstat(child) do
       {:ok, %{type: :directory}} -> recursive_size(child)
+      {:ok, %{type: :symlink}} -> 0
       {:ok, %{size: size}} -> size
       _ -> 0
     end
@@ -351,7 +382,7 @@ defmodule Zaq.Ingestion.FileExplorer do
     |> Task.async_stream(
       fn name ->
         entry_path = Path.join(full_path, name)
-        stat = File.stat!(entry_path, time: :posix)
+        stat = File.lstat!(entry_path, time: :posix)
 
         %{
           name: name,

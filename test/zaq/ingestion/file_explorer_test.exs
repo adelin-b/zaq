@@ -88,6 +88,56 @@ defmodule Zaq.Ingestion.FileExplorerTest do
     end
   end
 
+  describe "symlink containment" do
+    setup do
+      outside = "#{@test_base}_outside"
+      File.rm_rf!(outside)
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "secret.pdf"), "%PDF-outside")
+      File.ln_s!(Path.expand(outside), Path.join(@test_base, "escape"))
+
+      on_exit(fn -> File.rm_rf!(outside) end)
+
+      %{outside: outside}
+    end
+
+    test "rejects reads through an in-root symlink" do
+      assert {:error, :path_traversal} = FileExplorer.file_info("escape/secret.pdf")
+    end
+
+    test "rejects writes through an in-root symlink", %{outside: outside} do
+      assert {:error, :path_traversal} =
+               FileExplorer.upload("escape/new.pdf", "%PDF-new")
+
+      refute File.exists?(Path.join(outside, "new.pdf"))
+    end
+
+    test "rejects deletes through an in-root symlink", %{outside: outside} do
+      assert {:error, :path_traversal} = FileExplorer.delete("escape/secret.pdf")
+      assert File.exists?(Path.join(outside, "secret.pdf"))
+    end
+
+    test "does not follow a broken symlink chosen by unique upload", %{outside: outside} do
+      File.write!(Path.join(@test_base, "report.pdf"), "existing")
+      outside_target = Path.join(outside, "new.pdf")
+      File.ln_s!(outside_target, Path.join(@test_base, "report(1).pdf"))
+
+      assert {:ok, path} = FileExplorer.upload_unique("report.pdf", "safe")
+      assert Path.basename(path) == "report(2).pdf"
+      assert File.read!(path) == "safe"
+      refute File.exists?(outside_target)
+    end
+
+    test "does not include files reached through symlinks in folder size" do
+      assert FileExplorer.folder_size("default", ".") == 0
+    end
+
+    test "allows writes through ordinary non-existing nested paths" do
+      assert {:ok, path} = FileExplorer.upload("fresh/nested/file.md", "safe")
+      assert File.read!(path) == "safe"
+    end
+  end
+
   describe "list/1" do
     test "lists files and folders" do
       File.mkdir_p!(Path.join(@test_base, "subdir"))

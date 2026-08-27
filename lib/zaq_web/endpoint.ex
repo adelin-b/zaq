@@ -44,6 +44,8 @@ defmodule ZaqWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  plug ZaqWeb.Plugs.ChatBearerAuth, path_prefixes: ["/chat", "/v1"]
+
   plug Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],

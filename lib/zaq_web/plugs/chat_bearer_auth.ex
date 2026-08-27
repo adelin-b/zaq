@@ -5,7 +5,19 @@ defmodule ZaqWeb.Plugs.ChatBearerAuth do
 
   def init(opts), do: opts
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
+    if protected_path?(conn, opts), do: authenticate(conn), else: conn
+  end
+
+  defp protected_path?(_conn, []), do: true
+
+  defp protected_path?(conn, opts) do
+    Enum.any?(Keyword.fetch!(opts, :path_prefixes), fn prefix ->
+      conn.request_path == prefix or String.starts_with?(conn.request_path, prefix <> "/")
+    end)
+  end
+
+  defp authenticate(conn) do
     with expected when is_binary(expected) and expected != "" <-
            System.get_env("ZAQ_CHAT_TOKEN"),
          ["Bearer " <> token] <- get_req_header(conn, "authorization"),
@@ -15,7 +27,7 @@ defmodule ZaqWeb.Plugs.ChatBearerAuth do
       nil -> reject(conn, 503, "chat transport not configured")
       "" -> reject(conn, 503, "chat transport not configured")
       [] -> reject(conn, 401, "missing bearer token")
-      _ -> reject(conn, 403, "invalid bearer token")
+      _ -> reject(conn, 401, "invalid bearer token")
     end
   end
 
