@@ -102,8 +102,9 @@ defmodule Zaq.Agent.ClientToolRun do
   # Loop
   # ---------------------------------------------------------------------------
 
+  # Errors carry the usage of the model calls already made (USAGE-4).
   defp loop(state, iteration) when iteration > state.max_iterations,
-    do: {:error, :max_iterations_reached}
+    do: {:error, :max_iterations_reached, state.usage}
 
   defp loop(state, iteration) do
     messages = AIContext.to_messages(state.context)
@@ -113,7 +114,7 @@ defmodule Zaq.Agent.ClientToolRun do
         state |> add_usage(turn) |> next(turn, iteration)
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, reason, state.usage}
     end
   end
 
@@ -352,7 +353,9 @@ defmodule Zaq.Agent.ClientToolRun do
     |> Map.merge(token_fields(usage))
   end
 
-  defp to_result({:error, reason}) do
+  defp to_result({:error, reason}), do: to_result({:error, reason, nil})
+
+  defp to_result({:error, reason, usage}) do
     Logger.error("Client-tool run failed: #{inspect(reason)}")
 
     %{
@@ -363,6 +366,7 @@ defmodule Zaq.Agent.ClientToolRun do
       client_tool_calls: [],
       sources: []
     }
+    |> Map.merge(token_fields(usage))
   end
 
   defp token_fields(%{input_tokens: prompt, output_tokens: completion, total_tokens: total}),

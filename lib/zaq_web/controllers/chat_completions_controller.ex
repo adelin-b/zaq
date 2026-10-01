@@ -430,13 +430,19 @@ defmodule ZaqWeb.ChatCompletionsController do
         do: acc,
         else: %{acc | conn: start_sse(acc.conn), sse_started?: true}
 
+    # A failed run still reports the usage of the model calls it made (USAGE-4).
     acc.conn
     |> emit(stream_error(acc, reason))
+    |> emit_usage(acc)
     |> sse_done()
   end
 
   defp respond_error(%{stream?: false} = acc, reason) do
-    json_error(acc.conn, 502, error_message(reason))
+    body = %{error: %{message: error_message(reason)}}
+
+    acc.conn
+    |> put_status(502)
+    |> json(if acc.usage, do: Map.put(body, :usage, acc.usage), else: body)
   end
 
   # ---------------------------------------------------------------------------

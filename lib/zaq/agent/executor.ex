@@ -280,7 +280,8 @@ defmodule Zaq.Agent.Executor do
             dims,
             selected_agent_result,
             execution_opts,
-            server_manager_module
+            server_manager_module,
+            partial
           )
 
         {:error, reason} ->
@@ -324,7 +325,8 @@ defmodule Zaq.Agent.Executor do
         dims,
         selected_agent_result,
         opts,
-        server_manager_module
+        server_manager_module,
+        partial
       )
     end
   end
@@ -341,13 +343,16 @@ defmodule Zaq.Agent.Executor do
 
   defp content_delivered?(_), do: false
 
+  # `partial` is the run's result so far: the usage of the model calls it made
+  # is reported on the error result too, never estimated.
   defp surface_execution_error(
          incoming,
          reason,
          dims,
          selected_agent_result,
          opts,
-         server_manager_module
+         server_manager_module,
+         partial \\ nil
        ) do
     reason =
       enrich_provider_authentication_error(
@@ -362,9 +367,21 @@ defmodule Zaq.Agent.Executor do
 
     Outgoing.from_pipeline_result(
       incoming,
-      error_result(reason, maybe_configured_agent(selected_agent_result))
+      reason
+      |> error_result(maybe_configured_agent(selected_agent_result))
+      |> Map.merge(partial_token_fields(partial))
     )
   end
+
+  defp partial_token_fields(%{measurements: %{} = measurements}) do
+    %{
+      prompt_tokens: measurement_value(measurements, "input_tokens"),
+      completion_tokens: measurement_value(measurements, "output_tokens"),
+      total_tokens: measurement_value(measurements, "total_tokens")
+    }
+  end
+
+  defp partial_token_fields(_partial), do: %{}
 
   defp enrich_provider_authentication_error(
          reason,
