@@ -3,7 +3,7 @@ defmodule ZaqWeb.ChatCompletionsController do
   OpenAI-compatible `POST /v1/chat/completions` for the `:chat` channel.
 
   The wire contract (request validation, completion and chunk shapes,
-  keepalive, citations, caller tools, errors) is specified in
+  keepalive, citations, usage, caller tools, errors) is specified in
   `docs/services/chat-completions.md`; this module implements it.
 
   ## Pipeline routing
@@ -110,6 +110,8 @@ defmodule ZaqWeb.ChatCompletionsController do
       created: created_ts(),
       model: fetch(params, "model") || "zaq-chat",
       stream?: stream?(params),
+      include_usage?: include_usage?(params),
+      usage: nil,
       # Progressive streaming state: SSE headers/role frame are sent lazily on
       # the first delta; `sent` tracks the bytes already on the wire so the
       # final answer only appends its remainder.
@@ -297,6 +299,7 @@ defmodule ZaqWeb.ChatCompletionsController do
 
   defp respond(acc, %Outgoing{} = outgoing) do
     answer = clean_answer(outgoing.body)
+    acc = %{acc | usage: usage(outgoing)}
 
     case client_tool_calls(outgoing) do
       [] ->
@@ -340,7 +343,7 @@ defmodule ZaqWeb.ChatCompletionsController do
     acc = if answer == "", do: acc, else: finish_answer(acc, answer)
     conn = emit(acc.conn, chunk(acc, %{tool_calls: calls}, nil))
     conn = if sources == [], do: conn, else: emit(conn, sources_frame(acc, sources))
-    conn |> emit(chunk(acc, %{}, "tool_calls")) |> sse_done()
+    conn |> emit(chunk(acc, %{}, "tool_calls")) |> emit_usage(acc) |> sse_done()
   end
 
   defp deliver_tool_calls(%{stream?: false} = acc, answer, calls, sources) do
@@ -372,11 +375,33 @@ defmodule ZaqWeb.ChatCompletionsController do
     # consuming at `finish_reason`, so anything after it is dropped — and
     # citations are the whole point of the zaq_sources extension.
     conn = if sources == [], do: acc.conn, else: emit(acc.conn, sources_frame(acc, sources))
-    conn |> emit(chunk(acc, %{}, "stop")) |> sse_done()
+    conn |> emit(chunk(acc, %{}, "stop")) |> emit_usage(acc) |> sse_done()
   end
 
   defp deliver(%{stream?: false} = acc, answer, sources) do
     json(acc.conn, completion(acc, %{role: "assistant", content: answer}, sources, "stop"))
+  end
+
+  # OpenAI `stream_options.include_usage`: one last chunk with empty `choices`
+  # carries the usage of the whole request.
+  defp emit_usage(conn, %{include_usage?: true, usage: %{} = usage} = acc),
+    do: emit(conn, %{chunk(acc, %{}, nil) | choices: []} |> Map.put(:usage, usage))
+
+  defp emit_usage(conn, _acc), do: conn
+
+  # Token counts the LLM provider reported for the model calls of this request,
+  # summed by the run. nil when the provider reported none: never estimated.
+  defp usage(%Outgoing{metadata: metadata}) do
+    prompt = metadata_get(metadata, :prompt_tokens)
+    completion = metadata_get(metadata, :completion_tokens)
+
+    if is_integer(prompt) and is_integer(completion) do
+      %{
+        prompt_tokens: prompt,
+        completion_tokens: completion,
+        total_tokens: metadata_get(metadata, :total_tokens) || prompt + completion
+      }
+    end
   end
 
   # Reconcile the authoritative final answer with what streaming already sent.
@@ -579,6 +604,7 @@ defmodule ZaqWeb.ChatCompletionsController do
       ],
       zaq_sources: sources_payload(sources)
     }
+    |> then(&if(acc.usage, do: Map.put(&1, :usage, acc.usage), else: &1))
   end
 
   # The SSE headers are already on the wire by the time most errors surface, so
@@ -860,6 +886,9 @@ defmodule ZaqWeb.ChatCompletionsController do
   defp map_or(_value, default), do: default
 
   defp stream?(params), do: fetch(params, "stream") == true
+
+  defp include_usage?(params),
+    do: params |> fetch("stream_options") |> fetch("include_usage") == true
 
   defp last_user_content(messages) when is_list(messages) do
     messages

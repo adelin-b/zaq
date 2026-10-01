@@ -10,8 +10,9 @@ This document is the contract. Each rule has an identifier; the acceptance
 tests in `test/zaq_web/controllers/chat_completions_controller_test.exs` and
 `test/zaq_web/endpoint_chat_auth_test.exs` quote it in their names.
 
-**Status:** proposed. The acceptance tests encode these rules and fail until the
-implementation lands.
+Implementation: `ZaqWeb.Plugs.ChatBearerAuth` (authentication),
+`ZaqWeb.ChatCompletionsController` (wire contract), `Zaq.Channels.ChatBridge`
+(channel bridge) and `Zaq.Agent.ClientToolRun` (runs with caller tools).
 
 ## Configuration
 

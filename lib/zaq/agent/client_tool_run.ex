@@ -29,7 +29,7 @@ defmodule Zaq.Agent.ClientToolRun do
   require Logger
 
   alias Jido.AI.Context, as: AIContext
-  alias Jido.AI.{ToolAdapter, Turn}
+  alias Jido.AI.{ToolAdapter, Turn, Usage}
   alias Zaq.Agent.{Answering, Factory, HistoryLoader, ProviderSpec, Status, StreamEvents}
   alias Zaq.Engine.Messages.{Incoming, Outgoing}
   alias Zaq.Identity.ExecutionActor
@@ -51,6 +51,10 @@ defmodule Zaq.Agent.ClientToolRun do
       arguments}]} | %{role: :tool, tool_call_id:, name:, content:}]`
     * `:question`, `:person_id`, `:team_ids`, `:source_filter`, `:skip_permissions`,
       `:node_router` — as for `Zaq.Agent.Executor.run/2`
+
+  The result carries the provider-reported token usage summed over the run's
+  LLM calls (`prompt_tokens`, `completion_tokens`, `total_tokens`), like the
+  executor's; the fields are absent when the provider reported none.
   """
   @spec run(Incoming.t(), keyword()) :: Outgoing.t()
   def run(%Incoming{} = incoming, opts) do
@@ -75,6 +79,7 @@ defmodule Zaq.Agent.ClientToolRun do
           model: model,
           context: initial_context(incoming, runtime, opts),
           tool_calls: [],
+          usage: nil,
           max_iterations: agent.max_iterations || 10
         }
 
@@ -105,7 +110,7 @@ defmodule Zaq.Agent.ClientToolRun do
 
     case stream_step(state.model, messages, state.llm_opts, &stream_delta(state, &1)) do
       {:ok, turn} ->
-        next(state, turn, iteration)
+        state |> add_usage(turn) |> next(turn, iteration)
 
       {:error, reason} ->
         {:error, reason}
@@ -134,9 +139,18 @@ defmodule Zaq.Agent.ClientToolRun do
     %{
       answer: turn.text,
       tool_calls: state.tool_calls,
-      client_tool_calls: client_calls
+      client_tool_calls: client_calls,
+      usage: state.usage
     }
   end
+
+  # Provider-reported counts only; a turn without usage adds nothing.
+  defp add_usage(state, %Turn{usage: %{} = usage}) when map_size(usage) > 0 do
+    counts = Usage.token_counts(usage)
+    %{state | usage: Map.merge(state.usage || %{}, counts, fn _key, a, b -> a + b end)}
+  end
+
+  defp add_usage(state, _turn), do: state
 
   defp run_internal(state, turn, calls) do
     context = AIContext.append_assistant(state.context, Turn.assistant_content(turn), calls)
@@ -331,7 +345,12 @@ defmodule Zaq.Agent.ClientToolRun do
   # Result
   # ---------------------------------------------------------------------------
 
-  defp to_result({:ok, result}), do: Map.merge(%{error: false, sources: []}, result)
+  defp to_result({:ok, %{usage: usage} = result}) do
+    result
+    |> Map.delete(:usage)
+    |> Map.merge(%{error: false, sources: []})
+    |> Map.merge(token_fields(usage))
+  end
 
   defp to_result({:error, reason}) do
     Logger.error("Client-tool run failed: #{inspect(reason)}")
@@ -345,4 +364,9 @@ defmodule Zaq.Agent.ClientToolRun do
       sources: []
     }
   end
+
+  defp token_fields(%{input_tokens: prompt, output_tokens: completion, total_tokens: total}),
+    do: %{prompt_tokens: prompt, completion_tokens: completion, total_tokens: total}
+
+  defp token_fields(_usage), do: %{}
 end
