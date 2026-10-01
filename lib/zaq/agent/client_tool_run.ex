@@ -30,11 +30,25 @@ defmodule Zaq.Agent.ClientToolRun do
 
   alias Jido.AI.Context, as: AIContext
   alias Jido.AI.{ToolAdapter, Turn, Usage}
-  alias Zaq.Agent.{Answering, Factory, HistoryLoader, ProviderSpec, Status, StreamEvents}
+
+  alias Zaq.Agent.{
+    Answering,
+    Executor,
+    Factory,
+    HistoryLoader,
+    ProviderSpec,
+    Status,
+    StreamEvents
+  }
+
+  alias Zaq.Agent.ContextWindow.RequestTransformer
   alias Zaq.Engine.Messages.{Incoming, Outgoing}
   alias Zaq.Identity.ExecutionActor
 
   @flush_interval_ms 100
+  # Output tokens the context window reserves when the agent sets no
+  # `max_tokens`: Jido.AI ReAct's default, which the agent server reserves too.
+  @default_max_tokens 4_096
 
   @typedoc "A caller tool from the request, already validated by the controller."
   @type client_tool :: %{name: String.t(), description: String.t(), parameters: map()}
@@ -55,13 +69,21 @@ defmodule Zaq.Agent.ClientToolRun do
   The result carries the provider-reported token usage summed over the run's
   LLM calls (`prompt_tokens`, `completion_tokens`, `total_tokens`), like the
   executor's; the fields are absent when the provider reported none.
+
+  Like the agent server, every LLM request is fitted to the agent's context
+  window (`Zaq.Agent.ContextWindow.RequestTransformer`), and the run records the
+  executor's telemetry with the executor's dimensions.
   """
   @spec run(Incoming.t(), keyword()) :: Outgoing.t()
   def run(%Incoming{} = incoming, opts) do
+    started_at = System.monotonic_time(:millisecond)
     agent = Answering.answering_configured_agent()
+    dims = Executor.telemetry_dimensions(incoming, {:ok, agent})
+    :ok = Executor.record_run_start(dims)
+    actor_result = execution_actor(opts)
 
-    result =
-      with {:ok, actor} <- execution_actor(opts),
+    outcome =
+      with {:ok, actor} <- actor_result,
            {:ok, runtime} <- Factory.runtime_config(agent, actor: actor),
            {:ok, model} <- ProviderSpec.build(agent),
            {:ok, client_tools} <- reqllm_client_tools(Keyword.get(opts, :client_tools, [])),
@@ -78,7 +100,9 @@ defmodule Zaq.Agent.ClientToolRun do
             |> put_tool_choice(Keyword.get(opts, :tool_choice)),
           model: model,
           context: initial_context(incoming, runtime, opts),
+          context_window: runtime.context_window,
           tool_calls: [],
+          llm_calls: [],
           usage: nil,
           max_iterations: agent.max_iterations || 10
         }
@@ -86,7 +110,24 @@ defmodule Zaq.Agent.ClientToolRun do
         loop(state, 1)
       end
 
-    Outgoing.from_pipeline_result(incoming, to_result(result))
+    result = to_result(outcome, started_at)
+
+    actor =
+      case actor_result do
+        {:ok, actor} -> actor
+        _error -> nil
+      end
+
+    :ok = record_telemetry(outcome, result, {dims, actor, incoming, agent})
+    Outgoing.from_pipeline_result(incoming, result)
+  end
+
+  defp record_telemetry({:ok, _finished}, result, {dims, actor, incoming, agent}),
+    do: Executor.record_success_telemetry(result, dims, actor, incoming, agent)
+
+  defp record_telemetry(error, result, {dims, actor, incoming, agent}) do
+    :ok = Executor.record_partial_llm_telemetry(result, dims, actor, incoming, {:ok, agent})
+    Executor.record_execution_error(dims, elem(error, 1))
   end
 
   # Same identity the Executor binds the agent server to: the dispatching
@@ -102,20 +143,34 @@ defmodule Zaq.Agent.ClientToolRun do
   # Loop
   # ---------------------------------------------------------------------------
 
-  # Errors carry the usage of the model calls already made (USAGE-4).
+  # Errors carry the state, hence the usage of the model calls already made
+  # (USAGE-4).
   defp loop(state, iteration) when iteration > state.max_iterations,
-    do: {:error, :max_iterations_reached, state.usage}
+    do: {:error, :max_iterations_reached, state}
 
   defp loop(state, iteration) do
-    messages = AIContext.to_messages(state.context)
-
-    case stream_step(state.model, messages, state.llm_opts, &stream_delta(state, &1)) do
-      {:ok, turn} ->
-        state |> add_usage(turn) |> next(turn, iteration)
-
-      {:error, reason} ->
-        {:error, reason, state.usage}
+    with {:ok, messages} <- fit_context_window(state),
+         {:ok, turn} <-
+           stream_step(state.model, messages, state.llm_opts, &stream_delta(state, &1)) do
+      state |> record_call(turn) |> next(turn, iteration)
+    else
+      {:error, reason} -> {:error, reason, state}
     end
+  end
+
+  # The projection the agent server applies before every turn: oldest history
+  # first out, `{:context_window_exceeded, _}` when the mandatory part does not
+  # fit. `state.context` itself keeps everything.
+  defp fit_context_window(state) do
+    RequestTransformer.fit(
+      %{
+        messages: AIContext.to_messages(state.context),
+        llm_opts: state.llm_opts,
+        model: state.model
+      },
+      state.context_window,
+      Keyword.get(state.llm_opts, :max_tokens, @default_max_tokens)
+    )
   end
 
   defp next(state, %Turn{tool_calls: []} = turn, _iteration),
@@ -141,17 +196,25 @@ defmodule Zaq.Agent.ClientToolRun do
       answer: turn.text,
       tool_calls: state.tool_calls,
       client_tool_calls: client_calls,
+      llm_calls: state.llm_calls,
       usage: state.usage
     }
   end
 
-  # Provider-reported counts only; a turn without usage adds nothing.
-  defp add_usage(state, %Turn{usage: %{} = usage}) when map_size(usage) > 0 do
+  # One entry per model call, in the executor's `llm_calls` shape, and the
+  # run's usage. Provider-reported counts only; a turn without usage adds none.
+  defp record_call(state, %Turn{usage: %{} = usage} = turn) when map_size(usage) > 0 do
     counts = Usage.token_counts(usage)
-    %{state | usage: Map.merge(state.usage || %{}, counts, fn _key, a, b -> a + b end)}
+
+    %{
+      state
+      | usage: Map.merge(state.usage || %{}, counts, fn _key, a, b -> a + b end),
+        llm_calls: state.llm_calls ++ [Map.put(counts, :model, turn.model)]
+    }
   end
 
-  defp add_usage(state, _turn), do: state
+  defp record_call(state, turn),
+    do: %{state | llm_calls: state.llm_calls ++ [%{model: turn.model}]}
 
   defp run_internal(state, turn, calls) do
     context = AIContext.append_assistant(state.context, Turn.assistant_content(turn), calls)
@@ -357,16 +420,20 @@ defmodule Zaq.Agent.ClientToolRun do
   # Result
   # ---------------------------------------------------------------------------
 
-  defp to_result({:ok, %{usage: usage} = result}) do
+  # `latency_ms` and `confidence_score` complete the executor's result shape
+  # its telemetry reads.
+  defp to_result({:ok, %{usage: usage} = result}, started_at) do
     result
     |> Map.delete(:usage)
-    |> Map.merge(%{error: false, sources: []})
+    |> Map.merge(%{error: false, sources: [], confidence_score: nil})
+    |> Map.put(:latency_ms, System.monotonic_time(:millisecond) - started_at)
     |> Map.merge(token_fields(usage))
   end
 
-  defp to_result({:error, reason}), do: to_result({:error, reason, nil})
+  defp to_result({:error, reason}, started_at),
+    do: to_result({:error, reason, %{usage: nil, llm_calls: []}}, started_at)
 
-  defp to_result({:error, reason, usage}) do
+  defp to_result({:error, reason, state}, _started_at) do
     Logger.error("Client-tool run failed: #{inspect(reason)}")
 
     %{
@@ -375,9 +442,10 @@ defmodule Zaq.Agent.ClientToolRun do
       error_reason: inspect(reason),
       tool_calls: [],
       client_tool_calls: [],
+      llm_calls: state.llm_calls,
       sources: []
     }
-    |> Map.merge(token_fields(usage))
+    |> Map.merge(token_fields(state.usage))
   end
 
   defp token_fields(%{input_tokens: prompt, output_tokens: completion, total_tokens: total}),

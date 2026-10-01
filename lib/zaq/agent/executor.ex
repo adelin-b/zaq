@@ -173,8 +173,7 @@ defmodule Zaq.Agent.Executor do
     selected_agent_result = load_selected_agent(opts, agent_module, factory_module)
     dims = telemetry_dimensions(incoming, selected_agent_result)
 
-    :ok = Telemetry.record("qa.message.count", 1, dims)
-    :ok = Telemetry.record("qa.custom_agent.execution.start", 1, dims)
+    :ok = record_run_start(dims)
 
     question = Keyword.get(opts, :question, incoming.content)
     execution_opts = effective_execution_opts(opts, incoming, actor_result)
@@ -407,7 +406,17 @@ defmodule Zaq.Agent.Executor do
   defp owner_type(%{owner_type: owner_type}), do: owner_type
   defp owner_type(_dependency), do: nil
 
-  defp record_execution_error(dims, reason) do
+  # The telemetry helpers below are shared with `Zaq.Agent.ClientToolRun`, so
+  # runs with caller tools record the same metrics and dimensions.
+
+  @doc "Records the start of a run: `qa.message.count` and the execution start."
+  def record_run_start(dims) do
+    :ok = Telemetry.record("qa.message.count", 1, dims)
+    Telemetry.record("qa.custom_agent.execution.start", 1, dims)
+  end
+
+  @doc "Records a failed run, typed by `reason`."
+  def record_execution_error(dims, reason) do
     :ok =
       Telemetry.record(
         "qa.custom_agent.execution.error",
@@ -571,7 +580,11 @@ defmodule Zaq.Agent.Executor do
     ArgumentError -> nil
   end
 
-  defp record_success_telemetry(result, dims, actor, incoming, configured_agent) do
+  @doc """
+  Records a completed run: answer, latency, token, per-model-call and
+  confidence metrics read from the run result.
+  """
+  def record_success_telemetry(result, dims, actor, incoming, configured_agent) do
     :ok = Telemetry.record("qa.custom_agent.execution.complete", 1, dims)
     :ok = Telemetry.record("qa.answer.count", 1, dims)
 
@@ -648,8 +661,9 @@ defmodule Zaq.Agent.Executor do
 
   defp token_telemetry_dimensions(_result, dimensions), do: dimensions
 
-  defp record_partial_llm_telemetry(partial, dims, actor, incoming, selected_agent_result)
-       when is_map(partial) do
+  @doc "Records the model calls of a failed run's partial result."
+  def record_partial_llm_telemetry(partial, dims, actor, incoming, selected_agent_result)
+      when is_map(partial) do
     configured_agent =
       case selected_agent_result do
         {:ok, selected} -> selected
@@ -659,7 +673,7 @@ defmodule Zaq.Agent.Executor do
     record_llm_call_telemetry(partial, dims, actor, incoming, configured_agent)
   end
 
-  defp record_partial_llm_telemetry(_partial, _dims, _actor, _incoming, _selected_agent_result),
+  def record_partial_llm_telemetry(_partial, _dims, _actor, _incoming, _selected_agent_result),
     do: :ok
 
   defp telemetry_actor({:ok, actor}), do: actor
@@ -726,7 +740,8 @@ defmodule Zaq.Agent.Executor do
 
   defp normalize_status_result(_other, %Incoming{} = fallback_incoming), do: fallback_incoming
 
-  defp telemetry_dimensions(incoming, selected_agent_result) do
+  @doc "Dimensions every run metric carries: the incoming's, plus the agent's."
+  def telemetry_dimensions(incoming, selected_agent_result) do
     base = incoming_telemetry_dimensions(incoming)
 
     runtime =
