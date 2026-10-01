@@ -19,6 +19,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
   alias Ecto.Adapters.SQL.Sandbox
   alias Zaq.Accounts.People
   alias Zaq.Engine.Conversations
+  alias Zaq.Engine.Telemetry.{Buffer, Point}
   alias Zaq.Ingestion.{Chunk, ChunkLanguages, Document}
   alias Zaq.{Permissions, Repo}
   alias Zaq.SystemConfigFixtures
@@ -64,7 +65,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
 
       if request["stream"] == true do
         send(opts[:test_pid], {:llm_call, request})
-        serve(conn, Agent.get_and_update(opts[:script], &pop/1))
+        serve(conn, Agent.get_and_update(opts[:script], &pop/1), opts[:test_pid])
       else
         send_json(conn, 200, translation(request))
       end
@@ -73,13 +74,15 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
     defp pop([]), do: {nil, []}
     defp pop([turn | rest]), do: {turn, rest}
 
-    defp serve(conn, nil),
+    defp serve(conn, nil, _test_pid),
       do: send_json(conn, 500, %{"error" => %{"message" => "unscripted model call"}})
 
-    defp serve(conn, %{error_status: status}),
+    defp serve(conn, %{error_status: status}, _test_pid),
       do: send_json(conn, status, %{"error" => %{"message" => "provider failure"}})
 
-    defp serve(conn, turn) do
+    # A write that fails means the model's client closed the connection: it is
+    # reported as :llm_stream_closed and the turn stops there.
+    defp serve(conn, turn, test_pid) do
       # Wall-clock pacing is the behaviour under test where it is set (a model
       # that is silent, or that generates over time); the provider boundary
       # offers no other clock.
@@ -87,36 +90,35 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
 
       conn = conn |> put_resp_content_type("text/event-stream") |> send_chunked(200)
 
-      conn =
-        Enum.reduce(turn.text, conn, fn part, conn ->
-          {:ok, conn} = chunk(conn, frame([choice(%{"content" => part}, nil)]))
-          if turn.pause_ms > 0, do: Process.sleep(turn.pause_ms)
-          conn
-        end)
+      text =
+        Enum.map(
+          turn.reasoning,
+          &{frame([choice(%{"reasoning_content" => &1}, nil)]), turn.pause_ms}
+        ) ++
+          Enum.map(turn.text, &{frame([choice(%{"content" => &1}, nil)]), turn.pause_ms})
 
-      conn =
-        case turn.tool_calls do
-          [] ->
-            conn
-
-          calls ->
-            {:ok, conn} = chunk(conn, frame([choice(%{"tool_calls" => wire_calls(calls)}, nil)]))
-            conn
-        end
+      calls =
+        if turn.tool_calls == [],
+          do: [],
+          else: [frame([choice(%{"tool_calls" => wire_calls(turn.tool_calls)}, nil)])]
 
       finish = if turn.tool_calls == [], do: "stop", else: "tool_calls"
-      {:ok, conn} = chunk(conn, frame([choice(%{}, finish)]))
+      usage = if turn.usage, do: [frame([], %{"usage" => turn.usage})], else: []
+      rest = calls ++ [frame([choice(%{}, finish)])] ++ usage ++ ["data: [DONE]\n\n"]
 
-      conn =
-        if turn.usage do
-          {:ok, conn} = chunk(conn, frame([], %{"usage" => turn.usage}))
-          conn
-        else
-          conn
-        end
+      Enum.reduce_while(text ++ Enum.map(rest, &{&1, 0}), conn, &write_frame(&1, &2, test_pid))
+    end
 
-      {:ok, conn} = chunk(conn, "data: [DONE]\n\n")
-      conn
+    defp write_frame({data, pause_ms}, conn, test_pid) do
+      case chunk(conn, data) do
+        {:ok, conn} ->
+          Process.sleep(pause_ms)
+          {:cont, conn}
+
+        {:error, _reason} ->
+          send(test_pid, :llm_stream_closed)
+          {:halt, conn}
+      end
     end
 
     defp wire_calls(calls) do
@@ -192,6 +194,7 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
       text: text,
       tool_calls: calls,
       usage: Keyword.get(opts, :usage, @usage),
+      reasoning: Keyword.get(opts, :reasoning, []),
       delay_ms: Keyword.get(opts, :delay_ms, 0),
       pause_ms: Keyword.get(opts, :pause_ms, 0)
     }
@@ -326,6 +329,52 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
 
   defp restore_env(name, nil), do: System.delete_env(name)
   defp restore_env(name, value), do: System.put_env(name, value)
+
+  # Streams `body` through a real HTTP listener and closes the socket once the
+  # first content delta arrived: a closed connection is the behaviour under
+  # test, and the Plug test adapter has no socket to close.
+  defp disconnect_after_content(body) do
+    port = free_port()
+
+    start_supervised!(
+      Supervisor.child_spec({Bandit, plug: ZaqWeb.Endpoint, scheme: :http, port: port},
+        id: :chat_listener
+      )
+    )
+
+    json = body |> Map.put("stream", true) |> Jason.encode!()
+    {:ok, socket} = :gen_tcp.connect({127, 0, 0, 1}, port, [:binary, active: false])
+
+    :ok =
+      :gen_tcp.send(socket, [
+        "POST #{@path} HTTP/1.1\r\nhost: localhost\r\n",
+        "authorization: Bearer #{@token}\r\ncontent-type: application/json\r\n",
+        "content-length: #{byte_size(json)}\r\n\r\n",
+        json
+      ])
+
+    received = receive_until(socket, ~s("content":), "")
+    :ok = :gen_tcp.close(socket)
+    received
+  end
+
+  defp receive_until(socket, pattern, acc) do
+    {:ok, data} = :gen_tcp.recv(socket, 0, 5_000)
+    acc = acc <> data
+    if String.contains?(acc, pattern), do: acc, else: receive_until(socket, pattern, acc)
+  end
+
+  # Telemetry points one request records: each metric with the dimensions
+  # that do not depend on the request itself.
+  defp recorded_metrics(fun) do
+    Buffer.flush()
+    Repo.delete_all(Point)
+    fun.()
+    :ok = Buffer.flush()
+
+    Repo.all(Point)
+    |> MapSet.new(&{&1.metric_key, Map.drop(&1.dimensions, ["conversation_id", "channel_id"])})
+  end
 
   defp free_port do
     {:ok, socket} = :gen_tcp.listen(0, [:binary, active: false, ip: {127, 0, 0, 1}])
@@ -1295,6 +1344,229 @@ defmodule ZaqWeb.ChatCompletionsControllerTest do
 
       assert %{"error" => %{"message" => _}} = resp
       assert length(llm_calls()) == 10
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Rules that hold for runs with and without caller tools.
+  # ---------------------------------------------------------------------------
+
+  for {label, extra} <- [
+        {"with caller tools", %{"tools" => [@weather]}},
+        {"without caller tools", %{}}
+      ] do
+    describe "failed runs and cancellation, #{label}" do
+      @describetag extra: extra
+
+      test "USAGE-4: a failed run still reports the usage of its model calls", ctx do
+        script(ctx, [
+          call_tools([search("k1", "budget")],
+            usage: %{"prompt_tokens" => 100, "completion_tokens" => 10, "total_tokens" => 110}
+          ),
+          provider_error(500),
+          provider_error(500),
+          provider_error(500)
+        ])
+
+        assert %{
+                 "error" => %{"message" => _},
+                 "usage" => %{
+                   "prompt_tokens" => 100,
+                   "completion_tokens" => 10,
+                   "total_tokens" => 110
+                 }
+               } = json_response(chat(request(ctx.extra)), 502)
+      end
+
+      test "USAGE-4: when streaming, the usage chunk follows the in-band error chunk", ctx do
+        script(ctx, [
+          call_tools([search("k1", "budget")],
+            usage: %{"prompt_tokens" => 100, "completion_tokens" => 10, "total_tokens" => 110}
+          ),
+          provider_error(500),
+          provider_error(500),
+          provider_error(500)
+        ])
+
+        sse =
+          ctx.extra
+          |> Map.put("stream_options", %{"include_usage" => true})
+          |> stream()
+          |> response(200)
+
+        assert [error_chunk, usage_chunk] = sse |> data_frames() |> Enum.take(-2)
+        assert %{"error" => %{"type" => "server_error"}} = error_chunk
+
+        assert %{
+                 "choices" => [],
+                 "usage" => %{
+                   "prompt_tokens" => 100,
+                   "completion_tokens" => 10,
+                   "total_tokens" => 110
+                 }
+               } = usage_chunk
+
+        assert String.ends_with?(sse, "data: [DONE]\n\n")
+      end
+
+      test "TOOL-11: a call to an unknown tool is answered with an error and the turn continues",
+           ctx do
+        # A run that crashes would only surface as the idle timeout.
+        with_timing(chat_result_timeout_ms: 5_000)
+
+        script(ctx, [
+          call_tools([{"u1", "lire_fichier", %{"chemin" => "/etc/passwd"}}]),
+          answer("Je ne peux pas lire ce fichier.")
+        ])
+
+        resp = json_response(chat(request(ctx.extra)), 200)
+
+        assert [%{"finish_reason" => "stop", "message" => %{"content" => content}}] =
+                 resp["choices"]
+
+        assert content == "Je ne peux pas lire ce fichier."
+        assert [_call, continuation] = llm_calls()
+
+        assert %{"role" => "tool", "tool_call_id" => "u1", "content" => result} =
+                 List.last(continuation["messages"])
+
+        assert result =~ "lire_fichier"
+        assert result =~ "not found"
+      end
+
+      test "CANCEL-1/CANCEL-2/CANCEL-3: a client that disconnects cancels the run, which stores nothing",
+           ctx do
+        parts = for i <- 1..30, do: "Étape #{i} de la recherche en cours. "
+
+        script(ctx, [
+          call_tools([search("k1", "budget")], text: parts, pause_ms: 100),
+          answer("Jamais envoyé.")
+        ])
+
+        conversation_id = Ecto.UUID.generate()
+
+        received =
+          ctx.extra
+          |> Map.put("conversation_id", conversation_id)
+          |> request()
+          |> disconnect_after_content()
+
+        assert received =~ "Étape 1"
+        assert_receive {:llm_call, _first}, 1_000
+
+        # The model call in progress is abandoned: its connection is closed
+        # long before its 3 s of output are written.
+        assert_receive :llm_stream_closed, 2_500
+        refute_receive {:llm_call, _}, 1_000
+        assert persisted(conversation_id) == []
+      end
+
+      test "CANCEL-2/CANCEL-3: a request that times out cancels its run, which stores nothing",
+           ctx do
+        with_timing(chat_result_timeout_ms: 1_000)
+
+        # A model call that reasons for 4 s without producing content.
+        script(ctx, [
+          call_tools([search("k1", "budget")],
+            reasoning: List.duplicate("Je réfléchis. ", 40),
+            pause_ms: 100
+          ),
+          answer("Trop tard.")
+        ])
+
+        conversation_id = Ecto.UUID.generate()
+        body = request(Map.put(ctx.extra, "conversation_id", conversation_id))
+
+        assert json_response(chat(body), 502)
+        assert_receive {:llm_call, _first}, 1_000
+        assert_receive :llm_stream_closed, 2_500
+        refute_receive {:llm_call, _}, 1_000
+        assert persisted(conversation_id) == []
+      end
+    end
+  end
+
+  describe "cancellation with caller tools" do
+    test "CANCEL-3: the caller can ask again; the abandoned turn is not in the history", ctx do
+      parts = for i <- 1..30, do: "Étape #{i} de la recherche en cours. "
+      script(ctx, [answer(parts, pause_ms: 100)])
+      base = %{"conversation_id" => Ecto.UUID.generate(), "tools" => [@weather]}
+
+      base
+      |> Map.put("messages", [user("Question abandonnée")])
+      |> request()
+      |> disconnect_after_content()
+
+      assert_receive :llm_stream_closed, 2_500
+
+      script(ctx, [answer("Nouvelle réponse.")])
+      follow_up = request(Map.put(base, "messages", [user("Nouvelle question")]))
+      assert json_response(chat(follow_up), 200)
+      assert [_abandoned, call] = llm_calls()
+      refute model_input(call) =~ "Question abandonnée"
+      refute model_input(call) =~ "Étape"
+    end
+  end
+
+  describe "caller-tool run parity" do
+    test "TOOL-12: a tool exchange beyond the context window fails without calling the model",
+         ctx do
+      script(ctx, [answer("Jamais.")])
+
+      call = %{
+        "id" => "call_1",
+        "type" => "function",
+        "function" => %{"name" => "get_weather", "arguments" => ~s({"city":"Paris"})}
+      }
+
+      body =
+        request(%{
+          "tools" => [@weather],
+          "messages" => [
+            user("Quel temps à Paris ?"),
+            %{"role" => "assistant", "content" => nil, "tool_calls" => [call]},
+            %{
+              "role" => "tool",
+              "tool_call_id" => "call_1",
+              "content" => String.duplicate("nuage ", 60_000)
+            }
+          ]
+        })
+
+      assert %{"error" => %{"message" => _}} = json_response(chat(body), 502)
+      assert llm_calls() == []
+    end
+
+    test "TOOL-12: stored history is dropped oldest turn first to fit the context window", ctx do
+      # Each stored answer takes a little over half of the 128k-token window.
+      long = &(&1 <> " " <> String.duplicate("compte rendu ", 11_000))
+      script(ctx, [answer(long.("PREMIER")), answer(long.("SECOND")), answer("Réponse.")])
+      base = %{"conversation_id" => Ecto.UUID.generate()}
+
+      for question <- ["Un", "Deux"] do
+        assert json_response(chat(request(Map.put(base, "messages", [user(question)]))), 200)
+      end
+
+      with_tools = Map.merge(base, %{"tools" => [@weather], "messages" => [user("Trois")]})
+      assert json_response(chat(request(with_tools)), 200)
+
+      assert [_first, _second, third] = llm_calls()
+      refute model_input(third) =~ "PREMIER"
+      assert model_input(third) =~ "SECOND"
+      assert last_user_text(third) =~ "Trois"
+    end
+
+    test "TOOL-13: runs with caller tools record the same telemetry as runs without", ctx do
+      Sandbox.allow(Repo, self(), Process.whereis(Buffer))
+      script(ctx, [answer("Sans outils."), answer("Avec outils.")])
+
+      without = recorded_metrics(fn -> json_response(chat(request()), 200) end)
+
+      with_tools =
+        recorded_metrics(fn -> json_response(chat(request(%{"tools" => [@weather]})), 200) end)
+
+      assert Enum.any?(without, &match?({"qa.llm.call.count", _dimensions}, &1))
+      assert with_tools == without
     end
   end
 
