@@ -3,7 +3,7 @@ defmodule ZaqWeb.ChatCompletionsController do
   OpenAI-compatible `POST /v1/chat/completions` for the `:chat` channel.
 
   The wire contract (request validation, completion and chunk shapes,
-  keepalive, citations, errors) is specified in
+  keepalive, citations, caller tools, errors) is specified in
   `docs/services/chat-completions.md`; this module implements it.
 
   ## Pipeline routing
@@ -21,6 +21,10 @@ defmodule ZaqWeb.ChatCompletionsController do
   them as `{:chat_stream_delta, request_id, cumulative}`, and the controller
   emits the suffix not yet sent. The final result reconciles the authoritative
   answer with what was already streamed.
+
+  Requests that offer caller tools, or answer caller tool calls, run on
+  `Zaq.Agent.ClientToolRun` (see its moduledoc for why the agent server cannot
+  serve them).
 
   ## Security
 
@@ -48,6 +52,8 @@ defmodule ZaqWeb.ChatCompletionsController do
 
   @max_messages 200
   @source_marker ~r/\s*\[\[\.?source:[^\]]+\]\]/u
+  # OpenAI's own cap on `tools`.
+  @max_tools 128
   @max_sources 8
   @max_iter_sentinel "Maximum iterations reached"
   @default_result_timeout_ms 120_000
@@ -62,8 +68,9 @@ defmodule ZaqWeb.ChatCompletionsController do
          {:ok, user_id} <- fetch_required(params, "user", "user (owner id) is required"),
          {:ok, convo_id} <-
            fetch_required(params, "conversation_id", "conversation_id is required"),
+         {:ok, tooling} <- parse_tooling(params),
          {:ok, _conv} <- ensure_owned_conversation(convo_id, user_id) do
-      run(conn, params, question, convo_id, user_id)
+      run(conn, Map.put(params, :tooling, tooling), question, convo_id, user_id)
     else
       {:error, status, message} -> json_error(conn, status, message)
     end
@@ -120,7 +127,9 @@ defmodule ZaqWeb.ChatCompletionsController do
     # below has a wire to write to.
     acc = if acc.stream?, do: ensure_sse_role(acc), else: acc
 
-    case route(incoming, with_system(system_content(params), question)) do
+    run_opts = [question: with_system(system_content(params), question)] ++ params.tooling
+
+    case route(incoming, run_opts) do
       # Sync hop: the pipeline result came straight back.
       %Outgoing{} = outgoing -> respond(acc, outgoing)
       # Async hop: deltas + result arrive via ChatBridge broadcasts over PubSub.
@@ -129,13 +138,13 @@ defmodule ZaqWeb.ChatCompletionsController do
     end
   end
 
-  defp route(incoming, run_question) do
+  defp route(incoming, run_opts) do
     CommunicationBridge.route_incoming_message(
       incoming,
       # No BO channel-config surface for chat: without a global default agent,
       # pin the default answering executor (agentic run + tool citations)
       # instead of falling back to the legacy pipeline.
-      [question: run_question, default_answering_executor: true],
+      [default_answering_executor: true] ++ run_opts,
       actor_from_incoming(incoming)
     )
   end
@@ -289,10 +298,59 @@ defmodule ZaqWeb.ChatCompletionsController do
   defp respond(acc, %Outgoing{} = outgoing) do
     answer = clean_answer(outgoing.body)
 
-    case classify(outgoing.metadata, answer) do
-      :ok -> deliver(acc, answer, sources_from_outgoing(outgoing))
-      {:error, reason} -> respond_error(acc, reason)
+    case client_tool_calls(outgoing) do
+      [] ->
+        case classify(outgoing.metadata, answer) do
+          :ok -> deliver(acc, answer, sources_from_outgoing(outgoing))
+          {:error, reason} -> respond_error(acc, reason)
+        end
+
+      calls ->
+        deliver_tool_calls(acc, answer, calls, sources_from_outgoing(outgoing))
     end
+  end
+
+  # Tool calls the caller executes (see `Zaq.Agent.ClientToolRun`), in OpenAI's
+  # `tool_calls` shape: `arguments` is a JSON string.
+  defp client_tool_calls(%Outgoing{metadata: metadata}) do
+    metadata
+    |> metadata_get(:client_tool_calls)
+    |> List.wrap()
+    |> Enum.with_index()
+    |> Enum.map(fn {call, index} ->
+      %{
+        index: index,
+        id: non_empty(call_field(call, :id)) || "call_" <> Ecto.UUID.generate(),
+        type: "function",
+        function: %{
+          name: call_field(call, :name),
+          arguments: Jason.encode!(call_field(call, :arguments) || %{})
+        }
+      }
+    end)
+  end
+
+  defp call_field(call, key), do: Map.get(call, key) || Map.get(call, Atom.to_string(key))
+
+  defp non_empty(value) when is_binary(value) and value != "", do: value
+  defp non_empty(_value), do: nil
+
+  defp deliver_tool_calls(%{stream?: true} = acc, answer, calls, sources) do
+    acc = ensure_sse_role(acc)
+    acc = if answer == "", do: acc, else: finish_answer(acc, answer)
+    conn = emit(acc.conn, chunk(acc, %{tool_calls: calls}, nil))
+    conn = if sources == [], do: conn, else: emit(conn, sources_frame(acc, sources))
+    conn |> emit(chunk(acc, %{}, "tool_calls")) |> sse_done()
+  end
+
+  defp deliver_tool_calls(%{stream?: false} = acc, answer, calls, sources) do
+    message = %{
+      role: "assistant",
+      content: if(answer == "", do: nil, else: answer),
+      tool_calls: Enum.map(calls, &Map.delete(&1, :index))
+    }
+
+    json(acc.conn, completion(acc, message, sources, "tool_calls"))
   end
 
   # The pipeline never raises — errors come back flagged on the result. The
@@ -318,7 +376,7 @@ defmodule ZaqWeb.ChatCompletionsController do
   end
 
   defp deliver(%{stream?: false} = acc, answer, sources) do
-    json(acc.conn, completion(acc, answer, sources, "stop"))
+    json(acc.conn, completion(acc, %{role: "assistant", content: answer}, sources, "stop"))
   end
 
   # Reconcile the authoritative final answer with what streaming already sent.
@@ -506,7 +564,7 @@ defmodule ZaqWeb.ChatCompletionsController do
     }
   end
 
-  defp completion(acc, answer, sources, finish_reason) do
+  defp completion(acc, message, sources, finish_reason) do
     %{
       id: acc.id,
       object: "chat.completion",
@@ -515,7 +573,7 @@ defmodule ZaqWeb.ChatCompletionsController do
       choices: [
         %{
           index: 0,
-          message: %{role: "assistant", content: answer},
+          message: message,
           finish_reason: finish_reason
         }
       ],
@@ -636,6 +694,170 @@ defmodule ZaqWeb.ChatCompletionsController do
         nil
     end
   end
+
+  # ---------------------------------------------------------------------------
+  # Client tools (OpenAI `tools` / `tool_choice` / role "tool" messages).
+  #
+  # A request runs on `Zaq.Agent.ClientToolRun` when it offers the model tools
+  # (and `tool_choice` is not "none") or continues a tool call, i.e. its
+  # messages after the last user message carry the assistant `tool_calls` and
+  # the matching `tool` results. Otherwise no run option is added and the
+  # request takes the regular agent path.
+  # ---------------------------------------------------------------------------
+
+  defp parse_tooling(params) do
+    with {:ok, tools} <- parse_tools(fetch(params, "tools")),
+         {:ok, choice} <- parse_tool_choice(fetch(params, "tool_choice"), tools),
+         {:ok, exchange} <- parse_tool_exchange(fetch(params, "messages")) do
+      tools = if choice == "none", do: [], else: tools
+
+      if tools == [] and exchange == [],
+        do: {:ok, []},
+        else: {:ok, [client_tools: tools, tool_choice: choice, tool_exchange: exchange]}
+    end
+  end
+
+  defp parse_tools(nil), do: {:ok, []}
+
+  defp parse_tools(tools) when is_list(tools) and length(tools) <= @max_tools do
+    parsed = Enum.map(tools, &parse_tool/1)
+    names = Enum.map(parsed, &(&1 && &1.name))
+
+    cond do
+      nil in parsed ->
+        {:error, 400, ~s(each tool must be {"type": "function", "function": {"name": ...}})}
+
+      Enum.uniq(names) != names ->
+        {:error, 400, "tool names must be unique"}
+
+      true ->
+        {:ok, parsed}
+    end
+  end
+
+  defp parse_tools(tools) when is_list(tools),
+    do: {:error, 400, "too many tools (max #{@max_tools})"}
+
+  defp parse_tools(_tools), do: {:error, 400, "tools must be an array"}
+
+  defp parse_tool(%{"type" => "function", "function" => %{"name" => name} = function})
+       when is_binary(name) and name != "" do
+    %{
+      name: name,
+      description: string_or(fetch(function, "description"), ""),
+      parameters:
+        map_or(fetch(function, "parameters"), %{"type" => "object", "properties" => %{}})
+    }
+  end
+
+  defp parse_tool(_tool), do: nil
+
+  defp parse_tool_choice(choice, _tools) when choice in [nil, "auto", "none", "required"],
+    do: {:ok, choice}
+
+  defp parse_tool_choice(%{"type" => "function", "function" => %{"name" => name}} = choice, tools) do
+    if Enum.any?(tools, &(&1.name == name)),
+      do: {:ok, choice},
+      else: {:error, 400, "tool_choice names a function that is not in tools"}
+  end
+
+  defp parse_tool_choice(_choice, _tools), do: {:error, 400, "invalid tool_choice"}
+
+  # The assistant tool_calls and tool results that followed the last user
+  # message: ZAQ never stored them, so the caller's copy is the source of truth.
+  defp parse_tool_exchange(messages) when is_list(messages) do
+    messages
+    |> Enum.reverse()
+    |> Enum.take_while(&(fetch(&1, "role") != "user"))
+    |> Enum.reverse()
+    |> Enum.filter(&(fetch(&1, "role") in ["assistant", "tool"]))
+    |> Enum.reduce_while({:ok, [], %{}}, &exchange_message/2)
+    |> case do
+      {:ok, exchange, pending} when map_size(pending) == 0 ->
+        {:ok, Enum.reverse(exchange)}
+
+      {:ok, _exchange, _pending} ->
+        {:error, 400, "every tool_call needs a tool message answering it"}
+
+      {:error, message} ->
+        {:error, 400, message}
+    end
+  end
+
+  defp parse_tool_exchange(_messages), do: {:ok, []}
+
+  defp exchange_message(%{"role" => "assistant"} = msg, {:ok, acc, pending}) do
+    case parse_tool_calls(fetch(msg, "tool_calls")) do
+      {:ok, []} ->
+        {:cont, {:ok, acc, pending}}
+
+      {:ok, calls} ->
+        entry = %{
+          role: :assistant,
+          content: message_text(fetch(msg, "content")),
+          tool_calls: calls
+        }
+
+        {:cont, {:ok, [entry | acc], Map.merge(pending, Map.new(calls, &{&1.id, &1.name}))}}
+
+      {:error, message} ->
+        {:halt, {:error, message}}
+    end
+  end
+
+  defp exchange_message(%{"role" => "tool"} = msg, {:ok, acc, pending}) do
+    id = fetch(msg, "tool_call_id")
+
+    case Map.pop(pending, id) do
+      {nil, _pending} ->
+        {:halt, {:error, "tool message references an unknown tool_call_id"}}
+
+      {name, pending} ->
+        entry = %{
+          role: :tool,
+          tool_call_id: id,
+          name: name,
+          content: message_text(fetch(msg, "content")) || ""
+        }
+
+        {:cont, {:ok, [entry | acc], pending}}
+    end
+  end
+
+  defp parse_tool_calls(nil), do: {:ok, []}
+
+  defp parse_tool_calls(calls) when is_list(calls) do
+    Enum.reduce_while(calls, {:ok, []}, fn
+      %{"id" => id, "function" => %{"name" => name} = function}, {:ok, acc}
+      when is_binary(id) and id != "" and is_binary(name) ->
+        case decode_arguments(fetch(function, "arguments")) do
+          {:ok, arguments} -> {:cont, {:ok, acc ++ [%{id: id, name: name, arguments: arguments}]}}
+          :error -> {:halt, {:error, "tool_calls arguments must be a JSON object string"}}
+        end
+
+      _call, _acc ->
+        {:halt, {:error, "each tool_call needs an id and function.name"}}
+    end)
+  end
+
+  defp parse_tool_calls(_calls), do: {:error, "tool_calls must be an array"}
+
+  defp decode_arguments(nil), do: {:ok, %{}}
+
+  defp decode_arguments(json) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, %{} = arguments} -> {:ok, arguments}
+      _ -> :error
+    end
+  end
+
+  defp decode_arguments(_arguments), do: :error
+
+  defp string_or(value, _default) when is_binary(value), do: value
+  defp string_or(_value, default), do: default
+
+  defp map_or(%{} = value, _default), do: value
+  defp map_or(_value, default), do: default
 
   defp stream?(params), do: fetch(params, "stream") == true
 

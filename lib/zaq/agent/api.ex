@@ -19,6 +19,7 @@ defmodule Zaq.Agent.Api do
   alias Zaq.Agent
 
   alias Zaq.Agent.{
+    ClientToolRun,
     ErrorMessage,
     Executor,
     Factory,
@@ -416,6 +417,14 @@ defmodule Zaq.Agent.Api do
   end
 
   defp run_executor(executor_module, incoming, agent_id, pipeline_opts, event) do
+    # A request carrying caller-executed tools (OpenAI `tools`) needs a run that
+    # can stop on a tool call and resume from the caller's results, which the
+    # Jido agent server cannot do; see `Zaq.Agent.ClientToolRun`.
+    executor_module =
+      if Keyword.has_key?(pipeline_opts, :client_tools),
+        do: ClientToolRun,
+        else: executor_module
+
     executor_module.run(
       incoming,
       [
@@ -430,6 +439,7 @@ defmodule Zaq.Agent.Api do
         telemetry_dimensions: Keyword.get(pipeline_opts, :telemetry_dimensions, %{}),
         event: event
       ]
+      |> Keyword.merge(Keyword.take(pipeline_opts, [:client_tools, :tool_choice, :tool_exchange]))
       |> maybe_put_question(pipeline_opts)
     )
   end
@@ -450,26 +460,40 @@ defmodule Zaq.Agent.Api do
 
   # This function is a good candidate to go into the NodeRouter for generalization
   defp maybe_dispatch_return_hop(%Event{} = event, %Incoming{} = incoming, %Outgoing{} = outgoing) do
-    if delivery_through_channels?(outgoing.provider) do
-      node_router_mod = Keyword.get(event.opts, :node_router, Zaq.NodeRouter)
+    cond do
+      not delivery_through_channels?(outgoing.provider) ->
+        %{event | response: outgoing}
 
-      case persist_response_context(node_router_mod, event, incoming, outgoing) do
-        {:ok, persisted} ->
-          event
-          |> schedule_return_hop(enrich_outgoing_with_persistence(outgoing, persisted))
+      # The turn paused on caller-executed tool calls: the question is persisted
+      # once, with the final answer, when the caller sends the tool results.
+      awaiting_client_tools?(outgoing) ->
+        schedule_return_hop(event, outgoing)
 
-        {:error, reason} ->
-          log_persist_failure(event, reason)
-          broadcast_persist_failure(event, incoming, reason, node_router_mod)
-          %{event | response: {:error, {:persist_failed, reason}}, next_hop: nil}
-      end
-    else
-      %{event | response: outgoing}
+      true ->
+        persist_and_return(event, incoming, outgoing)
     end
   end
 
   defp maybe_dispatch_return_hop(%Event{} = event, _incoming, other),
     do: %{event | response: other}
+
+  defp awaiting_client_tools?(%Outgoing{metadata: metadata}),
+    do: match?([_ | _], Map.get(metadata, :client_tool_calls))
+
+  defp persist_and_return(%Event{} = event, %Incoming{} = incoming, %Outgoing{} = outgoing) do
+    node_router_mod = Keyword.get(event.opts, :node_router, Zaq.NodeRouter)
+
+    case persist_response_context(node_router_mod, event, incoming, outgoing) do
+      {:ok, persisted} ->
+        event
+        |> schedule_return_hop(enrich_outgoing_with_persistence(outgoing, persisted))
+
+      {:error, reason} ->
+        log_persist_failure(event, reason)
+        broadcast_persist_failure(event, incoming, reason, node_router_mod)
+        %{event | response: {:error, {:persist_failed, reason}}, next_hop: nil}
+    end
+  end
 
   defp log_persist_failure(%Event{} = event, reason) do
     Logger.error(
