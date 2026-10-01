@@ -78,6 +78,18 @@ defmodule Zaq.Channels.ChatBridge do
   @spec topic(String.t()) :: String.t()
   def topic(conversation_id), do: "chat:conv:#{conversation_id}"
 
+  @doc """
+  PubSub topic the run serving `request_id` listens on (the `:cancel_topic` run
+  option): it receives `:cancel_run` when the request ended before the result.
+  """
+  @spec cancel_topic(String.t()) :: String.t()
+  def cancel_topic(request_id), do: "chat:cancel:#{request_id}"
+
+  @doc "Cancels the run serving `request_id` (see `cancel_topic/1`)."
+  @spec cancel_run(String.t()) :: :ok | {:error, term()}
+  def cancel_run(request_id),
+    do: Phoenix.PubSub.broadcast(Zaq.PubSub, cancel_topic(request_id), :cancel_run)
+
   # Progressive streaming: the executor's `StreamEvents` flushes the answer's
   # cumulative text as `:stream_delta` upserts (~10/s). Forward them to the
   # waiting request process so the controller can emit OpenAI SSE deltas while

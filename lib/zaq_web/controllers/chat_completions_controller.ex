@@ -117,6 +117,8 @@ defmodule ZaqWeb.ChatCompletionsController do
       # final answer only appends its remainder.
       sse_started?: false,
       role_sent?: false,
+      # A write failed: the client is gone (CANCEL-1).
+      closed?: false,
       # Bytes already on the wire for the CURRENT ReAct segment; reset when a
       # new segment restarts the accumulator (see push_stream/2).
       sent: ""
@@ -129,7 +131,11 @@ defmodule ZaqWeb.ChatCompletionsController do
     # below has a wire to write to.
     acc = if acc.stream?, do: ensure_sse_role(acc), else: acc
 
-    run_opts = [question: with_system(system_content(params), question)] ++ params.tooling
+    run_opts =
+      [
+        question: with_system(system_content(params), question),
+        cancel_topic: ChatBridge.cancel_topic(request_id)
+      ] ++ params.tooling
 
     case route(incoming, run_opts) do
       # Sync hop: the pipeline result came straight back.
@@ -169,29 +175,44 @@ defmodule ZaqWeb.ChatCompletionsController do
 
     receive do
       {:chat_stream_delta, ^request_id, cumulative} ->
-        acc |> push_stream(cumulative) |> await_result(request_id)
+        acc |> push_stream(cumulative) |> unless_closed(request_id, &await_result(&1, request_id))
 
       {:chat_result, ^request_id, %Outgoing{} = outgoing} ->
         respond(acc, outgoing)
     after
       wait ->
         if now_ms() >= deadline do
+          # CANCEL-2: the request ends without the result; so does the run.
+          ChatBridge.cancel_run(request_id)
           respond_error(acc, :timeout)
         else
-          acc |> keepalive() |> await_result(request_id, deadline)
+          acc
+          |> keepalive()
+          |> unless_closed(request_id, &await_result(&1, request_id, deadline))
         end
     end
   end
+
+  # CANCEL-1/CANCEL-2: the client is gone, so nothing more is written and the
+  # run is cancelled instead of spending tokens on an answer nobody reads.
+  defp unless_closed(%{closed?: true} = acc, request_id, _continue) do
+    ChatBridge.cancel_run(request_id)
+    acc.conn
+  end
+
+  defp unless_closed(acc, _request_id, continue), do: continue.(acc)
 
   defp keepalive_ms(%{stream?: true}),
     do: Zaq.Config.get(:zaq, :chat_keepalive_ms, @default_keepalive_ms)
 
   defp keepalive_ms(_acc), do: :infinity
 
-  defp keepalive(acc) do
-    case chunk_out(acc.conn, ": keepalive\n\n") do
+  defp keepalive(acc), do: write(acc, ": keepalive\n\n")
+
+  defp write(acc, payload) do
+    case chunk_out(acc.conn, payload) do
       {:ok, conn} -> %{acc | conn: conn}
-      {:error, _reason} -> acc
+      {:error, _reason} -> %{acc | closed?: true}
     end
   end
 
@@ -291,7 +312,7 @@ defmodule ZaqWeb.ChatCompletionsController do
     end
   end
 
-  defp emit_acc(acc, frame_fun), do: %{acc | conn: emit(acc.conn, frame_fun.(acc))}
+  defp emit_acc(acc, frame_fun), do: write(acc, "data: #{Jason.encode!(frame_fun.(acc))}\n\n")
 
   # ---------------------------------------------------------------------------
   # Response — one pipeline result folded onto the OpenAI wire.

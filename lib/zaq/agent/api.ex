@@ -439,7 +439,9 @@ defmodule Zaq.Agent.Api do
         telemetry_dimensions: Keyword.get(pipeline_opts, :telemetry_dimensions, %{}),
         event: event
       ]
-      |> Keyword.merge(Keyword.take(pipeline_opts, [:client_tools, :tool_choice, :tool_exchange]))
+      |> Keyword.merge(
+        Keyword.take(pipeline_opts, [:client_tools, :tool_choice, :tool_exchange, :cancel_topic])
+      )
       |> maybe_put_question(pipeline_opts)
     )
   end
@@ -466,7 +468,9 @@ defmodule Zaq.Agent.Api do
 
       # The turn paused on caller-executed tool calls: the question is persisted
       # once, with the final answer, when the caller sends the tool results.
-      awaiting_client_tools?(outgoing) ->
+      # A cancelled run's request ended before it (client gone): nothing of
+      # the turn is stored, so the caller can ask again.
+      awaiting_client_tools?(outgoing) or cancelled?(outgoing) ->
         schedule_return_hop(event, outgoing)
 
       true ->
@@ -479,6 +483,9 @@ defmodule Zaq.Agent.Api do
 
   defp awaiting_client_tools?(%Outgoing{metadata: metadata}),
     do: match?([_ | _], Map.get(metadata, :client_tool_calls))
+
+  defp cancelled?(%Outgoing{metadata: metadata}),
+    do: Map.get(metadata, :termination_reason) == :cancelled
 
   defp persist_and_return(%Event{} = event, %Incoming{} = incoming, %Outgoing{} = outgoing) do
     node_router_mod = Keyword.get(event.opts, :node_router, Zaq.NodeRouter)

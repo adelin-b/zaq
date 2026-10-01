@@ -177,6 +177,7 @@ defmodule Zaq.Agent.Executor do
 
     question = Keyword.get(opts, :question, incoming.content)
     execution_opts = effective_execution_opts(opts, incoming, actor_result)
+    cancel_watcher = start_cancel_watcher(opts)
 
     result =
       with {:ok, actor} <- actor_result,
@@ -211,7 +212,7 @@ defmodule Zaq.Agent.Executor do
                node_router(execution_opts)
              ),
            %Incoming{} = incoming <- normalize_status_result(status_result, incoming),
-           {:ok, %{request: _request, events: events}} <-
+           {:ok, %{request: request, events: events}} <-
              factory_module.ask_with_config(server_ref, question, configured_agent,
                tool_context: %{
                  incoming: incoming,
@@ -223,6 +224,7 @@ defmodule Zaq.Agent.Executor do
                  node_router: Keyword.get(execution_opts, :node_router, Zaq.NodeRouter)
                }
              ),
+           :ok <- watch_request(cancel_watcher, factory_module, server_ref, request),
            {:ok, stream_result} <-
              StreamEvents.consume(events, incoming,
                started_at: started_at,
@@ -295,6 +297,60 @@ defmodule Zaq.Agent.Executor do
       end
 
     result
+  end
+
+  # A channel that can end a request before its result (the chat channel:
+  # client gone, idle timeout) passes `:cancel_topic` and broadcasts
+  # `:cancel_run` there; the agent server's cancel API then ends the request, and
+  # the run with `termination_reason: :cancelled`. The watcher subscribes before
+  # the run starts, so an early cancel is kept until the request exists, and it
+  # ends with the run.
+  defp start_cancel_watcher(opts) do
+    case Keyword.get(opts, :cancel_topic) do
+      nil ->
+        nil
+
+      topic ->
+        run = self()
+
+        watcher =
+          spawn(fn ->
+            ref = Process.monitor(run)
+            :ok = Phoenix.PubSub.subscribe(Zaq.PubSub, topic)
+            send(run, {:cancel_watcher_ready, self()})
+            await_cancel(ref, nil)
+          end)
+
+        receive do
+          {:cancel_watcher_ready, ^watcher} -> watcher
+        after
+          5_000 -> nil
+        end
+    end
+  end
+
+  # `pending` is nil, `:requested` (cancelled before the request existed) or
+  # the function cancelling the request.
+  defp await_cancel(ref, pending) do
+    receive do
+      {:watch_request, cancel} when pending == :requested -> cancel.()
+      {:watch_request, cancel} -> await_cancel(ref, cancel)
+      :cancel_run when is_function(pending) -> pending.()
+      :cancel_run -> await_cancel(ref, :requested)
+      {:DOWN, ^ref, :process, _pid, _reason} -> :ok
+    end
+  end
+
+  defp watch_request(nil, _factory_module, _server_ref, _request), do: :ok
+
+  defp watch_request(watcher, factory_module, server_ref, request) do
+    send(
+      watcher,
+      {:watch_request,
+       fn -> factory_module.cancel(server_ref, request_id: request.id, reason: :cancelled) end}
+    )
+
+    :ok
   end
 
   # A streaming error after tokens were already delivered means the answer is

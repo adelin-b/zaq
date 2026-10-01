@@ -81,6 +81,7 @@ defmodule Zaq.Agent.ClientToolRun do
     dims = Executor.telemetry_dimensions(incoming, {:ok, agent})
     :ok = Executor.record_run_start(dims)
     actor_result = execution_actor(opts)
+    :ok = subscribe_cancel(Keyword.get(opts, :cancel_topic))
 
     outcome =
       with {:ok, actor} <- actor_result,
@@ -149,12 +150,28 @@ defmodule Zaq.Agent.ClientToolRun do
     do: {:error, :max_iterations_reached, state}
 
   defp loop(state, iteration) do
-    with {:ok, messages} <- fit_context_window(state),
+    with :ok <- check_cancel(),
+         {:ok, messages} <- fit_context_window(state),
          {:ok, turn} <-
            stream_step(state.model, messages, state.llm_opts, &stream_delta(state, &1)) do
       state |> record_call(turn) |> next(turn, iteration)
     else
       {:error, reason} -> {:error, reason, state}
+    end
+  end
+
+  # A request that ended before its result (client gone, idle timeout) cancels
+  # the run (`:cancel_run` on the `:cancel_topic` option, see
+  # `Zaq.Channels.ChatBridge.cancel_topic/1`): no further model call starts, and
+  # the call in progress is abandoned at its next chunk (see stream_step/4).
+  defp subscribe_cancel(nil), do: :ok
+  defp subscribe_cancel(topic), do: Phoenix.PubSub.subscribe(Zaq.PubSub, topic)
+
+  defp check_cancel do
+    receive do
+      :cancel_run -> {:error, :cancelled}
+    after
+      0 -> :ok
     end
   end
 
@@ -372,15 +389,23 @@ defmodule Zaq.Agent.ClientToolRun do
   defp put_tool_choice(opts, choice) when is_binary(choice),
     do: Keyword.put(opts, :tool_choice, choice)
 
+  # Throwing out of the stream on cancellation runs ReqLLM's Stream.resource
+  # cleanup, which cancels the provider request.
   defp stream_step(model, messages, llm_opts, on_text) do
     with {:ok, response} <- ReqLLM.stream_text(model, messages, llm_opts),
          {:ok, response} <-
            ReqLLM.StreamResponse.to_response(%{
              response
-             | stream: tap_text(response.stream, on_text)
+             | stream: response.stream |> Stream.each(&throw_if_cancelled/1) |> tap_text(on_text)
            }) do
       {:ok, Turn.from_response(response)}
     end
+  catch
+    :throw, :cancel_run -> {:error, :cancelled}
+  end
+
+  defp throw_if_cancelled(_chunk) do
+    with {:error, :cancelled} <- check_cancel(), do: throw(:cancel_run)
   end
 
   # Calls `on_text` with the cumulative answer text, at most every
@@ -443,6 +468,8 @@ defmodule Zaq.Agent.ClientToolRun do
       tool_calls: [],
       client_tool_calls: [],
       llm_calls: state.llm_calls,
+      # `Zaq.Agent.Api` stores nothing of a cancelled turn.
+      termination_reason: if(reason == :cancelled, do: :cancelled, else: :error),
       sources: []
     }
     |> Map.merge(token_fields(state.usage))
