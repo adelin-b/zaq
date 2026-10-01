@@ -180,7 +180,18 @@ defmodule Zaq.Agent.ClientToolRun do
   end
 
   defp execute_internal(state, call) do
-    module = Map.fetch!(state.internal, call.name)
+    case Map.fetch(state.internal, call.name) do
+      {:ok, module} ->
+        execute_module(state, call, module)
+
+      # A name the model made up: answered like the agent server does
+      # (TOOL-11), so the model can recover instead of the run crashing.
+      :error ->
+        {:error, %{type: :unknown_tool, message: "Tool '#{call.name}' not found"}, []}
+    end
+  end
+
+  defp execute_module(state, call, module) do
     context = tool_context(state)
     tool_call = %{id: call.id, name: call.name, arguments: call.arguments, action_module: module}
 
