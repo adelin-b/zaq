@@ -188,6 +188,12 @@ data: [DONE]
   before `[DONE]`. Without that option no usage is streamed.
 - **USAGE-3** The numbers are never estimated: when the provider reports no
   usage, `usage` is absent and no usage chunk is sent.
+- **USAGE-4** A failed run (ERR-1, TOOL-10, TOOL-12) still reports the usage
+  of the model calls it made, under USAGE-1..3. Not streaming, the `502` body
+  carries `usage` beside `error` (`{"error": {...}, "usage": {...}}`; clients
+  that only read `error` ignore it). Streaming with `include_usage`, the usage
+  chunk follows the in-band error chunk, before `[DONE]`. A request that ends
+  before its run reports (ERR-2) carries no usage.
 
 ## Citations
 
@@ -218,6 +224,29 @@ Clients unaware of `zaq_sources` ignore it.
 - **ERR-3** The timeout is an idle timeout: each streamed content delta restarts
   it, so a long answer that keeps flowing is never cut. Keepalives do not
   restart it.
+
+## Cancellation
+
+- **CANCEL-1** When streaming, a request whose client has gone stops at the
+  first write that fails (a content delta or a keepalive, so within
+  `chat_keepalive_ms` while the model is silent): nothing more is written. A
+  non-streaming request cannot notice a disconnect before it answers.
+- **CANCEL-2** A request that ends before its run's result (CANCEL-1, or the
+  ERR-2 timeout) cancels the run, with or without caller tools: no further
+  model call starts, and the model call in progress is abandoned at its next
+  streamed chunk, closing the provider connection.
+- **CANCEL-3** A cancelled turn is not stored: neither the question nor any
+  partial answer joins the conversation (CONV-4), so the caller can ask again.
+  A run that finished before the disconnect was noticed has already stored its
+  turn.
+
+Limitation, runs without caller tools: they run on the agent server, which
+`Jido.AI.Agent.cancel/2` cancels. The request ends at once and nothing is
+stored, but a cancel that reaches the agent server before its worker's model
+call is under way is not seen by the worker, which then completes the turn in
+the background; and the abandoned question stays in the working memory of the
+conversation's agent server until that server restarts. Runs with caller tools
+have neither limitation.
 
 ## Caller-executed tools
 
@@ -266,6 +295,18 @@ Tools the **caller** executes follow OpenAI's protocol. ZAQ's own tools
   request fails as in ERR-1 without calling the model.
 - **TOOL-10** ZAQ's internal tool loop is bounded by the answering agent's
   maximum iterations (10 by default); reaching it fails as in ERR-1.
+- **TOOL-11** A model call to a tool that is neither one of ZAQ's tools nor one
+  of the caller's is not executed: the model receives a tool result whose error
+  names the unknown tool, and the turn continues (TOOL-10 bounds it).
+- **TOOL-12** Runs with caller tools apply the answering agent's context window
+  like every run: before each model call, stored history is dropped oldest
+  turn first until the request fits the model's window (`max_context_window`
+  less the reserved output). When the question, the tool exchange and the
+  tools alone do not fit, the request fails as in ERR-1 without calling the
+  model.
+- **TOOL-13** Runs with caller tools record the same telemetry as runs without
+  them: message, execution, answer, token and per-model-call metrics, with the
+  same dimensions.
 
 ## Related
 
